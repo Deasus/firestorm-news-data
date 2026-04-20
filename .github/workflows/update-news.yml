@@ -40,6 +40,9 @@ jobs:
           else
             TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M UTC')
             git commit -m "Update fire news — ${TIMESTAMP}"
-            git pull --rebase -X theirs || git rebase --abort
-            git push || git push --force-with-lease
+            git fetch origin main
+            git reset --soft origin/main
+            git add -A data/
+            git commit -m "Update fire news — ${TIMESTAMP}" --allow-empty
+            git push
           fi
