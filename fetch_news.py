@@ -101,49 +101,79 @@ def fetch_gdelt_geo():
     
     print("\n[GDELT GEO] Fetching geolocated fire news...")
     
-    url = (
-        'https://api.gdeltproject.org/api/v2/geo/geo?'
-        'query=wildfire OR "forest fire" OR bushfire OR "fire evacuation"'
-        '&mode=pointdata'
-        '&format=geojson'
-        '&timespan=24h'
-    )
+    # Try CSV format first (more reliable than GeoJSON for parsing)
+    formats_to_try = [
+        ('csv', 'https://api.gdeltproject.org/api/v2/geo/geo?query=wildfire OR "forest fire" OR "fire evacuation"&mode=pointdata&format=csv&timespan=24h'),
+        ('geojson', 'https://api.gdeltproject.org/api/v2/geo/geo?query=wildfire OR "forest fire"&mode=pointdata&format=geojson&timespan=24h'),
+    ]
     
-    try:
-        resp = requests.get(url, timeout=30)
-        if resp.status_code == 200:
-            # GEO API returns GeoJSON
-            text = resp.text
-            # Try to parse as JSON
-            try:
-                data = json.loads(text)
-                features = data.get('features', [])
-                print(f"  {len(features)} geolocated mentions")
-                
-                # Extract points with metadata
-                points = []
-                for f in features[:200]:  # Cap at 200 points
-                    props = f.get('properties', {})
-                    geom = f.get('geometry', {})
-                    coords = geom.get('coordinates', [0, 0])
-                    points.append({
-                        'lat': coords[1] if len(coords) > 1 else 0,
-                        'lng': coords[0] if len(coords) > 0 else 0,
-                        'name': props.get('name', ''),
-                        'count': props.get('count', 1),
-                        'url': props.get('url', ''),
-                        'html': props.get('html', '')
-                    })
+    for fmt, url in formats_to_try:
+        try:
+            resp = requests.get(url, timeout=30)
+            if resp.status_code != 200:
+                print(f"  {fmt}: HTTP {resp.status_code}")
+                continue
+            
+            text = resp.text.strip()
+            if not text or len(text) < 50:
+                print(f"  {fmt}: Empty response")
+                continue
+            
+            points = []
+            
+            if fmt == 'csv':
+                # CSV format: columns are typically lat, lng, count, name, etc.
+                lines = text.split('\n')
+                for line in lines[1:201]:  # Skip header, cap at 200
+                    parts = line.split(',')
+                    if len(parts) >= 3:
+                        try:
+                            lat = float(parts[0].strip())
+                            lng = float(parts[1].strip())
+                            count = int(parts[2].strip()) if len(parts) > 2 else 1
+                            name = parts[3].strip().strip('"') if len(parts) > 3 else ''
+                            if -90 <= lat <= 90 and -180 <= lng <= 180:
+                                points.append({'lat': lat, 'lng': lng, 'count': count, 'name': name})
+                        except (ValueError, IndexError):
+                            continue
+            
+            elif fmt == 'geojson':
+                try:
+                    data = json.loads(text)
+                    features = data.get('features', [])
+                    for f in features[:200]:
+                        props = f.get('properties', {})
+                        geom = f.get('geometry', {})
+                        coords = geom.get('coordinates', [0, 0])
+                        if len(coords) >= 2:
+                            points.append({
+                                'lat': coords[1], 'lng': coords[0],
+                                'name': props.get('name', ''),
+                                'count': props.get('count', 1),
+                                'url': props.get('url', ''),
+                            })
+                except json.JSONDecodeError:
+                    # Try parsing as HTML — extract coordinates from embedded data
+                    import re
+                    coord_pattern = re.findall(r'(-?\d+\.?\d*),\s*(-?\d+\.?\d*)', text[:50000])
+                    for lng_s, lat_s in coord_pattern[:200]:
+                        try:
+                            lat, lng = float(lat_s), float(lng_s)
+                            if -90 <= lat <= 90 and -180 <= lng <= 180:
+                                points.append({'lat': lat, 'lng': lng, 'name': '', 'count': 1})
+                        except ValueError:
+                            continue
+            
+            if points:
+                print(f"  {fmt}: {len(points)} geolocated mentions")
                 return points
-            except json.JSONDecodeError:
-                # GEO API might return HTML for some modes
-                print(f"  Response is not JSON ({len(text)} chars)")
-                return []
-        else:
-            print(f"  HTTP {resp.status_code}")
-    except Exception as e:
-        print(f"  Failed: {e}")
+            else:
+                print(f"  {fmt}: parsed but 0 valid points ({len(text)} chars)")
+                
+        except Exception as e:
+            print(f"  {fmt} failed: {e}")
     
+    print("  All GEO formats failed")
     return []
 
 # ── GDELT DISASTERS LIVE STREAM ──────────────────────────────────────
@@ -385,49 +415,107 @@ def fetch_inciweb():
     
     print("\n[InciWeb] Fetching incident feed...")
     
+    # Try multiple URL variations — InciWeb moved to Drupal in 2022
     urls = [
         'https://inciweb.wildfire.gov/feeds/rss/incidents',
+        'https://inciweb.wildfire.gov/feeds/rss/incidents/',
+        'https://inciweb.wildfire.gov/rss/incidents',
         'https://inciweb.nwcg.gov/feeds/rss/incidents',
+        'https://inciweb.nwcg.gov/feeds/rss/incidents/',
+    ]
+    
+    headers_to_try = [
+        {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36', 'Accept': 'application/rss+xml, application/xml, text/xml, */*'},
+        {'User-Agent': 'FIRESTORM/1.0 (Wildfire Intelligence Platform)', 'Accept': 'application/rss+xml, application/xml, text/xml'},
+        {'User-Agent': 'python-requests/2.31.0', 'Accept': '*/*'},
     ]
     
     for url in urls:
-        try:
-            resp = requests.get(url, timeout=15, headers={'User-Agent': 'FIRESTORM/1.0'})
-            if resp.status_code == 200:
-                root = ET.fromstring(resp.content)
-                items = []
-                for item in root.findall('.//item')[:50]:
-                    title = item.findtext('title', '')
-                    link = item.findtext('link', '')
-                    desc = item.findtext('description', '')
-                    pub_date = item.findtext('pubDate', '')
-                    
-                    # Try to extract lat/lng from georss
-                    lat, lng = 0, 0
-                    point = item.find('{http://www.georss.org/georss}point')
-                    if point is not None and point.text:
-                        parts = point.text.strip().split()
-                        if len(parts) == 2:
-                            try:
-                                lat, lng = float(parts[0]), float(parts[1])
-                            except ValueError:
-                                pass
-                    
-                    items.append({
-                        'title': title,
-                        'url': link,
-                        'description': desc[:300],
-                        'date': pub_date,
-                        'lat': lat,
-                        'lng': lng,
-                        'type': 'inciweb'
-                    })
+        for headers in headers_to_try:
+            try:
+                resp = requests.get(url, timeout=15, headers=headers, allow_redirects=True)
+                print(f"  {url} → HTTP {resp.status_code} ({len(resp.content)} bytes)")
                 
-                print(f"  {len(items)} incidents from InciWeb")
-                return items
-        except Exception as e:
-            print(f"  {url} failed: {e}")
+                if resp.status_code == 200 and len(resp.content) > 200:
+                    content = resp.content
+                    text = resp.text
+                    
+                    # Check if it's actually XML
+                    if '<rss' not in text[:500] and '<feed' not in text[:500] and '<item' not in text[:2000]:
+                        print(f"  Not RSS/XML content — skipping")
+                        continue
+                    
+                    try:
+                        root = ET.fromstring(content)
+                    except ET.ParseError as pe:
+                        print(f"  XML parse error: {pe}")
+                        continue
+                    
+                    items = []
+                    for item in root.findall('.//{http://www.w3.org/2005/Atom}entry'):
+                        title = (item.find('{http://www.w3.org/2005/Atom}title') or item).text or ''
+                        link_el = item.find('{http://www.w3.org/2005/Atom}link')
+                        link = link_el.get('href', '') if link_el is not None else ''
+                        summary = (item.find('{http://www.w3.org/2005/Atom}summary') or item).text or ''
+                        updated = (item.find('{http://www.w3.org/2005/Atom}updated') or item).text or ''
+                        items.append({
+                            'title': title.strip(),
+                            'url': link,
+                            'description': summary[:300],
+                            'date': updated,
+                            'lat': 0, 'lng': 0,
+                            'type': 'inciweb'
+                        })
+                    
+                    # Also try RSS 2.0 format
+                    if not items:
+                        for item in root.findall('.//item'):
+                            title = item.findtext('title', '')
+                            link = item.findtext('link', '')
+                            desc = item.findtext('description', '')
+                            pub_date = item.findtext('pubDate', '')
+                            
+                            lat, lng = 0, 0
+                            # GeoRSS
+                            for ns in ['http://www.georss.org/georss', 'http://www.w3.org/2003/01/geo/wgs84_pos#']:
+                                point = item.find(f'{{{ns}}}point')
+                                if point is not None and point.text:
+                                    parts = point.text.strip().split()
+                                    if len(parts) == 2:
+                                        try:
+                                            lat, lng = float(parts[0]), float(parts[1])
+                                        except ValueError:
+                                            pass
+                                lat_el = item.find(f'{{{ns}}}lat')
+                                lng_el = item.find(f'{{{ns}}}long')
+                                if lat_el is not None and lng_el is not None:
+                                    try:
+                                        lat, lng = float(lat_el.text), float(lng_el.text)
+                                    except (ValueError, TypeError):
+                                        pass
+                            
+                            items.append({
+                                'title': title.strip(),
+                                'url': link,
+                                'description': desc[:300],
+                                'date': pub_date,
+                                'lat': lat, 'lng': lng,
+                                'type': 'inciweb'
+                            })
+                    
+                    items = [i for i in items if i['title']]
+                    
+                    if items:
+                        print(f"  ✓ {len(items)} incidents from InciWeb")
+                        return items[:50]
+                    else:
+                        print(f"  Parsed XML but found 0 items")
+                        
+            except Exception as e:
+                print(f"  {url} error: {e}")
+                continue
     
+    print("  All InciWeb URLs failed")
     return []
 
 # ── Google News RSS ──────────────────────────────────────────────────
