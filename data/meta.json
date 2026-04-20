@@ -1,12 +1,12 @@
 {
-  "updated": "2026-04-20T16:53:54Z",
+  "updated": "2026-04-20T17:59:25Z",
   "counts": {
-    "total": 85,
-    "critical": 17,
-    "high": 62,
+    "total": 57,
+    "critical": 14,
+    "high": 43,
     "moderate": 0,
-    "gdelt": 48,
-    "google_news": 58,
+    "gdelt": 0,
+    "google_news": 57,
     "inciweb": 0,
     "geo_points": 0
   },
