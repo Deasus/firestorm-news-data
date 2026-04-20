@@ -1,0 +1,21 @@
+{
+  "updated": "2026-04-20T16:53:54Z",
+  "counts": {
+    "total": 85,
+    "critical": 17,
+    "high": 62,
+    "moderate": 0,
+    "gdelt": 48,
+    "google_news": 58,
+    "inciweb": 0,
+    "geo_points": 0
+  },
+  "sources": {
+    "gdelt_doc": "api.gdeltproject.org/api/v2/doc",
+    "gdelt_geo": "api.gdeltproject.org/api/v2/geo",
+    "gdelt_disasters": "data.gdeltproject.org disaster stream",
+    "inciweb": "inciweb.wildfire.gov",
+    "google_news": "news.google.com",
+    "bigquery": "no credentials"
+  }
+}
