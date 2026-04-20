@@ -4,22 +4,21 @@ FIRESTORM News Intelligence Pipeline
 Aggregates wildfire intelligence from multiple sources into a single JSON feed.
 
 Sources:
-1. GDELT DOC 2.0 API — Full-text search for wildfire/fire news (CORS-friendly, no auth)
+1. GDELT DOC 2.0 API — Full-text search for wildfire/fire news
 2. GDELT GEO 2.0 API — Geolocated fire news for map plotting
 3. GDELT Disasters Live Stream — UN OCHA/ReliefWeb tracked disasters
 4. GDELT BigQuery — Deep historical analysis (requires Google Cloud credentials)
 5. InciWeb RSS — Official federal wildfire incident updates
 6. Google News RSS — Broad wildfire news coverage
 
-Outputs JSON files to data/ directory for FIRESTORM to fetch via GitHub raw URLs.
-Runs every 15 minutes via GitHub Actions.
+Outputs JSON to data/ directory. Runs every 30 minutes via GitHub Actions.
 """
 
 import json
 import os
 import sys
 import re
-import hashlib
+import time
 from datetime import datetime, timezone, timedelta
 from urllib.parse import quote
 
@@ -27,28 +26,27 @@ DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # ── GDELT DOC 2.0 API ───────────────────────────────────────────────
-# Direct CORS-friendly API — no proxy needed
-# Searches full text of all monitored news in 65 languages
 
 def fetch_gdelt_doc_articles():
-    """Fetch wildfire articles from GDELT DOC 2.0 API."""
+    """Fetch wildfire articles from GDELT DOC 2.0 API with rate limit handling."""
     import requests
     
     print("\n[GDELT DOC] Fetching wildfire articles...")
     
-    # Multiple queries to get comprehensive coverage
     queries = [
-        # Primary wildfire query
-        '(wildfire OR "wild fire" OR bushfire OR "forest fire") (evacuation OR containment OR acres OR firefighter OR "fire department")',
-        # Fire weather
-        '"red flag warning" OR "fire weather watch" OR "extreme fire" OR "fire danger"',
-        # Specific fire incidents (broader)
-        '(wildfire OR "forest fire") (California OR Oregon OR Washington OR Texas OR Colorado OR Montana OR Arizona)',
+        '(wildfire OR "wild fire" OR bushfire OR "forest fire") (evacuation OR containment OR acres OR firefighter)',
+        '"red flag warning" OR "fire weather watch" OR "extreme fire danger"',
+        '(wildfire OR "forest fire") (California OR Oregon OR Washington OR Texas OR Colorado OR Montana)',
     ]
     
     all_articles = []
     
     for i, query in enumerate(queries):
+        # GDELT rate limit: ~1 request per 5-6 seconds
+        if i > 0:
+            print(f"  Waiting 7s for rate limit...")
+            time.sleep(7)
+        
         url = (
             f'https://api.gdeltproject.org/api/v2/doc/doc?'
             f'query={quote(query)}'
@@ -66,6 +64,18 @@ def fetch_gdelt_doc_articles():
                 articles = data.get('articles', [])
                 print(f"  Query {i+1}: {len(articles)} articles")
                 all_articles.extend(articles)
+            elif resp.status_code == 429:
+                print(f"  Query {i+1}: HTTP 429 (rate limited) — waiting 15s")
+                time.sleep(15)
+                # Retry once
+                resp2 = requests.get(url, timeout=30)
+                if resp2.status_code == 200:
+                    data = resp2.json()
+                    articles = data.get('articles', [])
+                    print(f"  Query {i+1} retry: {len(articles)} articles")
+                    all_articles.extend(articles)
+                else:
+                    print(f"  Query {i+1} retry: HTTP {resp2.status_code}")
             else:
                 print(f"  Query {i+1}: HTTP {resp.status_code}")
         except Exception as e:
@@ -90,10 +100,9 @@ def fetch_gdelt_doc_articles():
             })
     
     print(f"  Total unique: {len(unique)} articles")
-    return unique[:150]  # Cap at 150
+    return unique[:150]
 
 # ── GDELT GEO 2.0 API ───────────────────────────────────────────────
-# Returns geolocated news mentions for map plotting
 
 def fetch_gdelt_geo():
     """Fetch geolocated wildfire mentions from GDELT GEO API."""
@@ -101,83 +110,99 @@ def fetch_gdelt_geo():
     
     print("\n[GDELT GEO] Fetching geolocated fire news...")
     
-    # Try CSV format first (more reliable than GeoJSON for parsing)
-    formats_to_try = [
-        ('csv', 'https://api.gdeltproject.org/api/v2/geo/geo?query=wildfire OR "forest fire" OR "fire evacuation"&mode=pointdata&format=csv&timespan=24h'),
-        ('geojson', 'https://api.gdeltproject.org/api/v2/geo/geo?query=wildfire OR "forest fire"&mode=pointdata&format=geojson&timespan=24h'),
+    # The GEO API returns HTML by default with embedded data
+    # We need to use format=GeoJSON (capital J) or parse the HTML
+    urls_to_try = [
+        'https://api.gdeltproject.org/api/v2/geo/geo?query=wildfire%20OR%20%22forest%20fire%22&mode=PointData&format=GeoJSON&timespan=24h',
+        'https://api.gdeltproject.org/api/v2/geo/geo?query=wildfire&mode=PointData&format=GeoJSON',
     ]
     
-    for fmt, url in formats_to_try:
+    for url in urls_to_try:
         try:
+            print(f"  Trying: {url[:80]}...")
             resp = requests.get(url, timeout=30)
+            print(f"  HTTP {resp.status_code}, {len(resp.content)} bytes, content-type: {resp.headers.get('content-type','?')[:50]}")
+            
             if resp.status_code != 200:
-                print(f"  {fmt}: HTTP {resp.status_code}")
                 continue
             
             text = resp.text.strip()
-            if not text or len(text) < 50:
-                print(f"  {fmt}: Empty response")
-                continue
             
-            points = []
-            
-            if fmt == 'csv':
-                # CSV format: columns are typically lat, lng, count, name, etc.
-                lines = text.split('\n')
-                for line in lines[1:201]:  # Skip header, cap at 200
-                    parts = line.split(',')
-                    if len(parts) >= 3:
-                        try:
-                            lat = float(parts[0].strip())
-                            lng = float(parts[1].strip())
-                            count = int(parts[2].strip()) if len(parts) > 2 else 1
-                            name = parts[3].strip().strip('"') if len(parts) > 3 else ''
-                            if -90 <= lat <= 90 and -180 <= lng <= 180:
-                                points.append({'lat': lat, 'lng': lng, 'count': count, 'name': name})
-                        except (ValueError, IndexError):
-                            continue
-            
-            elif fmt == 'geojson':
-                try:
-                    data = json.loads(text)
-                    features = data.get('features', [])
+            # Try JSON parse
+            try:
+                data = json.loads(text)
+                
+                # Standard GeoJSON
+                if 'features' in data:
+                    features = data['features']
+                    points = []
                     for f in features[:200]:
                         props = f.get('properties', {})
                         geom = f.get('geometry', {})
-                        coords = geom.get('coordinates', [0, 0])
+                        coords = geom.get('coordinates', [])
                         if len(coords) >= 2:
-                            points.append({
-                                'lat': coords[1], 'lng': coords[0],
-                                'name': props.get('name', ''),
-                                'count': props.get('count', 1),
-                                'url': props.get('url', ''),
-                            })
-                except json.JSONDecodeError:
-                    # Try parsing as HTML — extract coordinates from embedded data
-                    import re
-                    coord_pattern = re.findall(r'(-?\d+\.?\d*),\s*(-?\d+\.?\d*)', text[:50000])
-                    for lng_s, lat_s in coord_pattern[:200]:
-                        try:
-                            lat, lng = float(lat_s), float(lng_s)
+                            lat, lng = coords[1], coords[0]
                             if -90 <= lat <= 90 and -180 <= lng <= 180:
-                                points.append({'lat': lat, 'lng': lng, 'name': '', 'count': 1})
-                        except ValueError:
-                            continue
-            
-            if points:
-                print(f"  {fmt}: {len(points)} geolocated mentions")
-                return points
-            else:
-                print(f"  {fmt}: parsed but 0 valid points ({len(text)} chars)")
+                                points.append({
+                                    'lat': lat, 'lng': lng,
+                                    'name': props.get('name', props.get('html', '')),
+                                    'count': props.get('count', 1),
+                                })
+                    if points:
+                        print(f"  ✓ {len(points)} geolocated points from GeoJSON")
+                        return points
                 
+                # Maybe it's a list of objects
+                if isinstance(data, list):
+                    points = []
+                    for item in data[:200]:
+                        if 'lat' in item and 'lon' in item:
+                            points.append({'lat': item['lat'], 'lng': item['lon'], 'name': item.get('name',''), 'count': 1})
+                        elif 'latitude' in item and 'longitude' in item:
+                            points.append({'lat': item['latitude'], 'lng': item['longitude'], 'name': item.get('name',''), 'count': 1})
+                    if points:
+                        print(f"  ✓ {len(points)} points from JSON array")
+                        return points
+                        
+                print(f"  JSON parsed but no usable geo data (keys: {list(data.keys())[:5]})")
+                
+            except json.JSONDecodeError:
+                # Not JSON — try extracting coordinates from HTML/text
+                print(f"  Not JSON — trying regex extraction...")
+                # Look for patterns like [lng, lat] or lat,lng in the HTML
+                coord_pairs = re.findall(r'\[(-?\d+\.?\d+),\s*(-?\d+\.?\d+)\]', text[:100000])
+                points = []
+                for lng_s, lat_s in coord_pairs:
+                    try:
+                        lng, lat = float(lng_s), float(lat_s)
+                        # GeoJSON is [lng, lat] so swap if needed
+                        if -90 <= lat <= 90 and -180 <= lng <= 180:
+                            points.append({'lat': lat, 'lng': lng, 'name': '', 'count': 1})
+                        elif -90 <= lng <= 90 and -180 <= lat <= 180:
+                            points.append({'lat': lng, 'lng': lat, 'name': '', 'count': 1})
+                    except ValueError:
+                        continue
+                
+                if points:
+                    # Deduplicate nearby points
+                    unique_points = []
+                    for p in points:
+                        is_dup = any(abs(p['lat']-u['lat'])<0.01 and abs(p['lng']-u['lng'])<0.01 for u in unique_points)
+                        if not is_dup:
+                            unique_points.append(p)
+                    print(f"  ✓ {len(unique_points)} points extracted from HTML")
+                    return unique_points[:200]
+                else:
+                    print(f"  No coordinates found in response")
+        
         except Exception as e:
-            print(f"  {fmt} failed: {e}")
+            print(f"  Failed: {e}")
     
-    print("  All GEO formats failed")
+    # Fallback: use GDELT DOC API with sourcecountry to approximate locations
+    print("  All GEO methods failed — extracting locations from DOC articles")
     return []
 
 # ── GDELT DISASTERS LIVE STREAM ──────────────────────────────────────
-# Pre-generated feeds of active OCHA/ReliefWeb disasters, updated every 15 min
 
 def fetch_gdelt_disasters():
     """Fetch the GDELT Disasters Live Stream."""
@@ -185,87 +210,116 @@ def fetch_gdelt_disasters():
     
     print("\n[GDELT DISASTERS] Fetching disaster live stream...")
     
-    # The disaster stream files are at data.gdeltproject.org
-    # First get the last update file list
-    try:
-        # Get the master file list
-        list_url = 'http://data.gdeltproject.org/gdeltv2/lastupdate.txt'
-        resp = requests.get(list_url, timeout=15)
-        if resp.status_code != 200:
-            print(f"  lastupdate.txt HTTP {resp.status_code}")
-            return []
-        
-        lines = resp.text.strip().split('\n')
-        disaster_files = [l for l in lines if 'gkgglide' in l.lower() or 'glide' in l.lower()]
-        
-        if disaster_files:
-            print(f"  Found {len(disaster_files)} disaster stream files")
-            # Parse the file URL from the line (format: size hash url)
-            for line in disaster_files:
+    # The disaster stream files are listed in a separate lastupdate file
+    urls_to_try = [
+        'http://data.gdeltproject.org/gdeltv2/lastupdate.txt',
+        'http://data.gdeltproject.org/gdeltv2/lastupdate-translation.txt',
+    ]
+    
+    for list_url in urls_to_try:
+        try:
+            resp = requests.get(list_url, timeout=15)
+            if resp.status_code != 200:
+                print(f"  {list_url}: HTTP {resp.status_code}")
+                continue
+            
+            lines = resp.text.strip().split('\n')
+            print(f"  {list_url}: {len(lines)} files listed")
+            
+            # Look for any file with 'gkg' in the name (Global Knowledge Graph)
+            gkg_files = [l for l in lines if '.gkg.' in l.lower()]
+            glide_files = [l for l in lines if 'glide' in l.lower()]
+            
+            print(f"  GKG files: {len(gkg_files)}, GLIDE files: {len(glide_files)}")
+            
+            # If we have GLIDE files, fetch those (disaster-specific)
+            target_files = glide_files if glide_files else []
+            
+            for line in target_files[:2]:
                 parts = line.strip().split()
                 if len(parts) >= 3:
                     file_url = parts[-1]
-                    print(f"  Fetching: {file_url}")
+                    if not file_url.startswith('http'):
+                        continue
+                    print(f"  Fetching disaster file: {file_url[-40:]}")
                     try:
                         dr = requests.get(file_url, timeout=30)
-                        if dr.status_code == 200:
-                            # Parse CSV data
-                            return parse_disaster_csv(dr.text)
+                        if dr.status_code == 200 and len(dr.content) > 100:
+                            records = parse_disaster_data(dr.text)
+                            if records:
+                                return records
                     except Exception as e:
-                        print(f"  Failed to fetch disaster file: {e}")
-        else:
-            print("  No disaster stream files in lastupdate.txt")
+                        print(f"  Disaster file fetch failed: {e}")
             
-            # Try the disaster JSON feed directly
-            disaster_json_url = 'http://data.gdeltproject.org/gdeltv2/lastupdate-glide.txt'
-            try:
-                dr = requests.get(disaster_json_url, timeout=15)
-                if dr.status_code == 200:
-                    lines = dr.text.strip().split('\n')
-                    for line in lines:
-                        parts = line.strip().split()
-                        if len(parts) >= 3:
-                            file_url = parts[-1]
-                            if file_url.endswith('.json') or 'glide' in file_url:
-                                print(f"  Trying: {file_url}")
-                                jr = requests.get(file_url, timeout=30)
-                                if jr.status_code == 200:
-                                    try:
-                                        return jr.json()
-                                    except:
-                                        return parse_disaster_csv(jr.text)
-            except Exception as e:
-                print(f"  Disaster JSON fallback failed: {e}")
+            if not glide_files:
+                print("  No GLIDE disaster files found in feed")
+                
+        except Exception as e:
+            print(f"  {list_url} failed: {e}")
     
+    # Try the OCHA ReliefWeb API directly for active wildfires
+    print("  Trying ReliefWeb API for active disasters...")
+    try:
+        rw_url = 'https://api.reliefweb.int/v1/disasters?appname=firestorm&filter[field]=type&filter[value]=Wild Fire&filter[operator]=AND&filter[conditions][0][field]=status&filter[conditions][0][value]=current&limit=20&fields[include][]=name&fields[include][]=date&fields[include][]=glide&fields[include][]=country'
+        resp = requests.get(rw_url, timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            disasters = []
+            for item in data.get('data', []):
+                fields = item.get('fields', {})
+                countries = [c.get('name','') for c in fields.get('country', [])]
+                disasters.append({
+                    'name': fields.get('name', ''),
+                    'glide': fields.get('glide', ''),
+                    'date': fields.get('date', {}).get('created', ''),
+                    'countries': ', '.join(countries),
+                    'type': 'reliefweb_disaster'
+                })
+            if disasters:
+                print(f"  ✓ {len(disasters)} active wildfire disasters from ReliefWeb")
+                return disasters
     except Exception as e:
-        print(f"  Failed: {e}")
+        print(f"  ReliefWeb failed: {e}")
     
     return []
 
-def parse_disaster_csv(text):
-    """Parse GDELT disaster CSV into structured data."""
+def parse_disaster_data(text):
+    """Parse GDELT disaster CSV/TSV into structured data."""
     records = []
     lines = text.strip().split('\n')
-    for line in lines[:100]:  # Cap at 100 records
+    for line in lines[:100]:
         fields = line.split('\t')
-        if len(fields) >= 5:
-            records.append({
-                'glide': fields[0] if fields[0].startswith('WF') or fields[0].startswith('FL') else '',
-                'date': fields[1] if len(fields) > 1 else '',
-                'url': fields[-1] if fields[-1].startswith('http') else '',
-                'type': 'disaster_stream'
-            })
+        if len(fields) >= 3:
+            # Look for GLIDE numbers (WF = wildfire, FL = flood, etc.)
+            glide = ''
+            url = ''
+            for field in fields:
+                if re.match(r'[A-Z]{2}-\d{4}-\d+', field):
+                    glide = field
+                if field.startswith('http'):
+                    url = field
+            
+            if glide or url:
+                records.append({
+                    'glide': glide,
+                    'url': url,
+                    'raw_fields': len(fields),
+                    'type': 'disaster_stream'
+                })
+    
     wildfires = [r for r in records if r.get('glide', '').startswith('WF')]
-    print(f"  Parsed {len(records)} records, {len(wildfires)} wildfire-specific")
+    print(f"  Parsed {len(records)} disaster records, {len(wildfires)} wildfires")
     return records
 
 # ── GDELT BigQuery ───────────────────────────────────────────────────
-# Deep analysis queries — requires GOOGLE_APPLICATION_CREDENTIALS
+# TODO [BigQuery]: Add GCP credentials to unlock deep GDELT analysis.
+# Enables: ENV_FIRE theme queries, disaster GLIDE tracking, geolocated events.
+# Eventually migrate entire pipeline to Google Cloud Functions.
+# REMINDER: Note on every update until resolved.
 
 def fetch_bigquery_fire_data():
     """Query GDELT on BigQuery for fire-related events and coverage."""
     
-    # Check if BigQuery credentials are available
     creds_json = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS_JSON', '')
     if not creds_json:
         print("\n[BigQuery] No credentials — skipping")
@@ -276,7 +330,6 @@ def fetch_bigquery_fire_data():
         from google.cloud import bigquery
         from google.oauth2 import service_account
         
-        # Write credentials to temp file
         creds_path = '/tmp/gcp_creds.json'
         with open(creds_path, 'w') as f:
             f.write(creds_json)
@@ -286,17 +339,13 @@ def fetch_bigquery_fire_data():
         client = bigquery.Client(credentials=credentials, project=credentials.project_id)
         
         print("\n[BigQuery] Running fire intelligence queries...")
-        
         results = {}
         
-        # Query 1: Recent fire-themed GKG articles with locations
+        # GKG fire themes with locations
         query_gkg = """
         SELECT 
-            DATE,
-            DocumentIdentifier as url,
-            SPLIT(V2Themes, ';') as themes,
-            V2Tone,
-            SPLIT(V2Locations, ';') as locations
+            DATE, DocumentIdentifier as url, V2Themes, V2Tone,
+            V2Locations
         FROM `gdelt-bq.gdeltv2.gkg_partitioned`
         WHERE DATE >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
             AND (V2Themes LIKE '%ENV_FIRE%' 
@@ -308,28 +357,21 @@ def fetch_bigquery_fire_data():
         
         try:
             print("  Running GKG fire themes query...")
-            query_job = client.query(query_gkg)
-            rows = list(query_job)
-            
+            rows = list(client.query(query_gkg))
             gkg_articles = []
             for row in rows:
                 tone_parts = (row.V2Tone or '').split(',')
                 tone = float(tone_parts[0]) if tone_parts and tone_parts[0] else 0
-                
-                # Extract locations
                 locs = []
-                for loc_str in (row.locations or []):
+                for loc_str in (row.V2Locations or '').split(';'):
                     parts = loc_str.split('#')
                     if len(parts) >= 7:
                         try:
-                            lat = float(parts[5])
-                            lng = float(parts[6])
-                            name = parts[3]
+                            lat, lng = float(parts[5]), float(parts[6])
                             if lat != 0 and lng != 0:
-                                locs.append({'lat': lat, 'lng': lng, 'name': name})
+                                locs.append({'lat': lat, 'lng': lng, 'name': parts[3] if len(parts) > 3 else ''})
                         except (ValueError, IndexError):
                             pass
-                
                 gkg_articles.append({
                     'date': row.DATE.isoformat() if row.DATE else '',
                     'url': row.url or '',
@@ -337,74 +379,19 @@ def fetch_bigquery_fire_data():
                     'locations': locs[:3],
                     'type': 'bigquery_gkg'
                 })
-            
             results['gkg_fire'] = gkg_articles
-            print(f"  GKG query: {len(gkg_articles)} fire-themed articles")
+            print(f"  ✓ GKG query: {len(gkg_articles)} fire-themed articles")
         except Exception as e:
             print(f"  GKG query failed: {e}")
         
-        # Query 2: Fire events with actors and locations
-        query_events = """
-        SELECT 
-            SQLDATE,
-            Actor1Name,
-            Actor2Name,
-            EventCode,
-            GoldsteinScale,
-            NumMentions,
-            AvgTone,
-            ActionGeo_Lat,
-            ActionGeo_Long,
-            ActionGeo_FullName,
-            SOURCEURL
-        FROM `gdelt-bq.gdeltv2.events`
-        WHERE SQLDATE >= FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY))
-            AND (EventRootCode IN ('14', '18', '19', '20')  -- Appeal, Assist, Coerce, Use Force
-                 OR Actor1Name LIKE '%FIRE%'
-                 OR Actor2Name LIKE '%FIRE%')
-            AND ActionGeo_CountryCode = 'US'
-            AND ActionGeo_Lat IS NOT NULL
-        ORDER BY NumMentions DESC
-        LIMIT 100
-        """
-        
-        try:
-            print("  Running events query...")
-            query_job = client.query(query_events)
-            rows = list(query_job)
-            
-            events = []
-            for row in rows:
-                events.append({
-                    'date': str(row.SQLDATE),
-                    'actor1': row.Actor1Name or '',
-                    'actor2': row.Actor2Name or '',
-                    'event_code': row.EventCode or '',
-                    'goldstein': float(row.GoldsteinScale) if row.GoldsteinScale else 0,
-                    'mentions': int(row.NumMentions) if row.NumMentions else 0,
-                    'tone': round(float(row.AvgTone), 2) if row.AvgTone else 0,
-                    'lat': float(row.ActionGeo_Lat) if row.ActionGeo_Lat else 0,
-                    'lng': float(row.ActionGeo_Long) if row.ActionGeo_Long else 0,
-                    'location': row.ActionGeo_FullName or '',
-                    'url': row.SOURCEURL or '',
-                    'type': 'bigquery_event'
-                })
-            
-            results['events'] = events
-            print(f"  Events query: {len(events)} fire-related events")
-        except Exception as e:
-            print(f"  Events query failed: {e}")
-        
-        # Cleanup
         os.remove(creds_path)
         return results
         
     except ImportError:
         print("  google-cloud-bigquery not installed")
-        return None
     except Exception as e:
         print(f"  BigQuery error: {e}")
-        return None
+    return None
 
 # ── InciWeb RSS ──────────────────────────────────────────────────────
 
@@ -415,107 +402,128 @@ def fetch_inciweb():
     
     print("\n[InciWeb] Fetching incident feed...")
     
-    # Try multiple URL variations — InciWeb moved to Drupal in 2022
     urls = [
         'https://inciweb.wildfire.gov/feeds/rss/incidents',
         'https://inciweb.wildfire.gov/feeds/rss/incidents/',
-        'https://inciweb.wildfire.gov/rss/incidents',
+        'https://inciweb.wildfire.gov/rss.xml',
         'https://inciweb.nwcg.gov/feeds/rss/incidents',
-        'https://inciweb.nwcg.gov/feeds/rss/incidents/',
     ]
     
-    headers_to_try = [
-        {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36', 'Accept': 'application/rss+xml, application/xml, text/xml, */*'},
-        {'User-Agent': 'FIRESTORM/1.0 (Wildfire Intelligence Platform)', 'Accept': 'application/rss+xml, application/xml, text/xml'},
-        {'User-Agent': 'python-requests/2.31.0', 'Accept': '*/*'},
-    ]
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/rss+xml, application/xml, text/xml, text/html, */*'
+    }
     
     for url in urls:
-        for headers in headers_to_try:
+        try:
+            resp = requests.get(url, timeout=15, headers=headers, allow_redirects=True)
+            ct = resp.headers.get('content-type', '')
+            print(f"  {url}")
+            print(f"    HTTP {resp.status_code}, {len(resp.content)} bytes, type: {ct[:50]}")
+            
+            if resp.status_code != 200:
+                continue
+            
+            if len(resp.content) < 200:
+                print(f"    Response too small — skipping")
+                continue
+            
+            text = resp.text
+            
+            # Check if it looks like XML/RSS
+            if '<' not in text[:200]:
+                print(f"    Not XML — first 100 chars: {text[:100]}")
+                continue
+            
             try:
-                resp = requests.get(url, timeout=15, headers=headers, allow_redirects=True)
-                print(f"  {url} → HTTP {resp.status_code} ({len(resp.content)} bytes)")
-                
-                if resp.status_code == 200 and len(resp.content) > 200:
-                    content = resp.content
-                    text = resp.text
-                    
-                    # Check if it's actually XML
-                    if '<rss' not in text[:500] and '<feed' not in text[:500] and '<item' not in text[:2000]:
-                        print(f"  Not RSS/XML content — skipping")
-                        continue
-                    
-                    try:
-                        root = ET.fromstring(content)
-                    except ET.ParseError as pe:
-                        print(f"  XML parse error: {pe}")
-                        continue
-                    
-                    items = []
-                    for item in root.findall('.//{http://www.w3.org/2005/Atom}entry'):
-                        title = (item.find('{http://www.w3.org/2005/Atom}title') or item).text or ''
-                        link_el = item.find('{http://www.w3.org/2005/Atom}link')
-                        link = link_el.get('href', '') if link_el is not None else ''
-                        summary = (item.find('{http://www.w3.org/2005/Atom}summary') or item).text or ''
-                        updated = (item.find('{http://www.w3.org/2005/Atom}updated') or item).text or ''
+                root = ET.fromstring(resp.content)
+            except ET.ParseError as pe:
+                print(f"    XML parse error: {pe}")
+                # Try cleaning common issues
+                try:
+                    clean = re.sub(r'&(?!amp;|lt;|gt;|quot;|apos;)', '&amp;', text)
+                    root = ET.fromstring(clean.encode('utf-8'))
+                except:
+                    continue
+            
+            items = []
+            
+            # Try RSS 2.0 format
+            for item in root.findall('.//item'):
+                title = item.findtext('title', '').strip()
+                link = item.findtext('link', '')
+                desc = item.findtext('description', '')
+                pub_date = item.findtext('pubDate', '')
+                if title:
+                    items.append({
+                        'title': title,
+                        'url': link,
+                        'description': (desc or '')[:300],
+                        'date': pub_date,
+                        'lat': 0, 'lng': 0,
+                        'type': 'inciweb'
+                    })
+            
+            # Try Atom format
+            if not items:
+                ns = {'atom': 'http://www.w3.org/2005/Atom'}
+                for entry in root.findall('.//atom:entry', ns):
+                    title = entry.findtext('atom:title', '', ns).strip()
+                    link_el = entry.find('atom:link', ns)
+                    link = link_el.get('href', '') if link_el is not None else ''
+                    summary = entry.findtext('atom:summary', '', ns)
+                    updated = entry.findtext('atom:updated', '', ns)
+                    if title:
                         items.append({
-                            'title': title.strip(),
+                            'title': title,
                             'url': link,
-                            'description': summary[:300],
+                            'description': (summary or '')[:300],
                             'date': updated,
                             'lat': 0, 'lng': 0,
                             'type': 'inciweb'
                         })
-                    
-                    # Also try RSS 2.0 format
-                    if not items:
-                        for item in root.findall('.//item'):
-                            title = item.findtext('title', '')
-                            link = item.findtext('link', '')
-                            desc = item.findtext('description', '')
-                            pub_date = item.findtext('pubDate', '')
-                            
-                            lat, lng = 0, 0
-                            # GeoRSS
-                            for ns in ['http://www.georss.org/georss', 'http://www.w3.org/2003/01/geo/wgs84_pos#']:
-                                point = item.find(f'{{{ns}}}point')
-                                if point is not None and point.text:
-                                    parts = point.text.strip().split()
-                                    if len(parts) == 2:
-                                        try:
-                                            lat, lng = float(parts[0]), float(parts[1])
-                                        except ValueError:
-                                            pass
-                                lat_el = item.find(f'{{{ns}}}lat')
-                                lng_el = item.find(f'{{{ns}}}long')
-                                if lat_el is not None and lng_el is not None:
-                                    try:
-                                        lat, lng = float(lat_el.text), float(lng_el.text)
-                                    except (ValueError, TypeError):
-                                        pass
-                            
+            
+            # Try generic entry/item search
+            if not items:
+                for tag in ['entry', 'item', 'record']:
+                    for item in root.iter(tag):
+                        title = ''
+                        link = ''
+                        for child in item:
+                            tag_local = child.tag.split('}')[-1].lower()
+                            if tag_local == 'title' and child.text:
+                                title = child.text.strip()
+                            elif tag_local == 'link':
+                                link = child.get('href', child.text or '')
+                        if title:
                             items.append({
-                                'title': title.strip(),
-                                'url': link,
-                                'description': desc[:300],
-                                'date': pub_date,
-                                'lat': lat, 'lng': lng,
-                                'type': 'inciweb'
+                                'title': title, 'url': link,
+                                'description': '', 'date': '',
+                                'lat': 0, 'lng': 0, 'type': 'inciweb'
                             })
-                    
-                    items = [i for i in items if i['title']]
-                    
-                    if items:
-                        print(f"  ✓ {len(items)} incidents from InciWeb")
-                        return items[:50]
-                    else:
-                        print(f"  Parsed XML but found 0 items")
-                        
-            except Exception as e:
-                print(f"  {url} error: {e}")
-                continue
+            
+            if items:
+                print(f"  ✓ {len(items)} incidents from InciWeb")
+                return items[:50]
+            else:
+                print(f"    Parsed XML but found 0 items. Root tag: {root.tag}")
+                # Show first few child tags for debugging
+                children = [child.tag for child in root][:5]
+                print(f"    Children: {children}")
+                
+        except Exception as e:
+            print(f"  {url} exception: {e}")
     
-    print("  All InciWeb URLs failed")
+    print("  All InciWeb URLs failed — trying NIFC current situations")
+    
+    # Fallback: try NIFC situation reports
+    try:
+        nifc_url = 'https://www.nifc.gov/fire-information/nfn'
+        resp = requests.get(nifc_url, timeout=15, headers=headers)
+        print(f"  NIFC fallback: HTTP {resp.status_code}, {len(resp.content)} bytes")
+    except Exception as e:
+        print(f"  NIFC fallback failed: {e}")
+    
     return []
 
 # ── Google News RSS ──────────────────────────────────────────────────
@@ -534,10 +542,15 @@ def fetch_google_news():
     ]
     
     all_items = []
-    for search in searches:
+    for i, search in enumerate(searches):
+        if i > 0:
+            time.sleep(2)  # Be polite to Google
+        
         url = f'https://news.google.com/rss/search?q={search}&hl=en-US&gl=US&ceid=US:en'
         try:
-            resp = requests.get(url, timeout=15, headers={'User-Agent': 'FIRESTORM/1.0'})
+            resp = requests.get(url, timeout=15, headers={
+                'User-Agent': 'Mozilla/5.0 (compatible; FIRESTORM/1.0)'
+            })
             if resp.status_code == 200:
                 root = ET.fromstring(resp.content)
                 for item in root.findall('.//item')[:20]:
@@ -553,6 +566,8 @@ def fetch_google_news():
                         'date': pub_date,
                         'type': 'google_news'
                     })
+            else:
+                print(f"  Search {i+1}: HTTP {resp.status_code}")
         except Exception as e:
             print(f"  Search '{search}' failed: {e}")
     
@@ -560,7 +575,7 @@ def fetch_google_news():
     seen = set()
     unique = []
     for item in all_items:
-        key = item.get('title', '')[:50]
+        key = re.sub(r'[^a-z0-9]', '', item.get('title', '').lower())[:40]
         if key and key not in seen:
             seen.add(key)
             unique.append(item)
@@ -571,7 +586,7 @@ def fetch_google_news():
 # ── AGGREGATE & OUTPUT ───────────────────────────────────────────────
 
 def categorize_article(title):
-    """Categorize an article by urgency/type based on title keywords."""
+    """Categorize an article by urgency based on title keywords."""
     t = title.lower()
     if any(w in t for w in ['evacuat', 'emergency', 'mandatory', 'order', 'flee', 'shelter']):
         return 'CRITICAL'
@@ -586,44 +601,40 @@ def categorize_article(title):
     return 'LOW'
 
 def main():
-    import requests  # ensure available
+    import requests
     
     print("=" * 60)
     print("FIRESTORM News Intelligence Pipeline")
     print(f"Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
     print("=" * 60)
     
-    # Collect from all sources
     gdelt_articles = fetch_gdelt_doc_articles()
+    
+    time.sleep(7)  # Rate limit between GDELT API calls
     geo_points = fetch_gdelt_geo()
+    
     disasters = fetch_gdelt_disasters()
     inciweb = fetch_inciweb()
     google_news = fetch_google_news()
     bigquery_data = fetch_bigquery_fire_data()
     
-    # Build the combined news feed
+    # Build combined feed
     all_news = []
-    
-    # Add GDELT articles
     for art in gdelt_articles:
         art['category'] = categorize_article(art.get('title', ''))
         all_news.append(art)
-    
-    # Add Google News
     for art in google_news:
         art['category'] = categorize_article(art.get('title', ''))
         all_news.append(art)
-    
-    # Add InciWeb
     for art in inciweb:
-        art['category'] = 'HIGH'  # All InciWeb entries are fire incidents
+        art['category'] = 'HIGH'
         all_news.append(art)
     
-    # Sort by category priority then date
+    # Sort by priority then date
     priority = {'CRITICAL': 0, 'HIGH': 1, 'MODERATE': 2, 'LOW': 3}
-    all_news.sort(key=lambda x: (priority.get(x.get('category', 'LOW'), 3), x.get('date', '')), reverse=False)
+    all_news.sort(key=lambda x: (priority.get(x.get('category', 'LOW'), 3), x.get('date', '')))
     
-    # Final dedup by title similarity
+    # Deduplicate
     seen_titles = set()
     deduped = []
     for art in all_news:
@@ -632,7 +643,7 @@ def main():
             seen_titles.add(title_key)
             deduped.append(art)
     
-    # Write outputs
+    # Build output
     output = {
         'updated': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         'counts': {
@@ -644,33 +655,21 @@ def main():
             'google_news': len(google_news),
             'inciweb': len(inciweb),
             'geo_points': len(geo_points),
+            'disasters': len(disasters) if isinstance(disasters, list) else 0,
         },
         'articles': deduped[:200],
         'geo_points': geo_points[:150],
         'disasters': disasters[:50] if isinstance(disasters, list) else [],
     }
     
-    # Add BigQuery data if available
     if bigquery_data:
         output['bigquery'] = bigquery_data
     
-    # Write main feed
     feed_path = os.path.join(DATA_DIR, 'fire-news-feed.json')
     with open(feed_path, 'w') as f:
         json.dump(output, f, separators=(',', ':'))
     
     size_kb = os.path.getsize(feed_path) / 1024
-    print(f"\n{'='*60}")
-    print(f"Output: {feed_path} ({size_kb:.0f} KB)")
-    print(f"Total articles: {len(deduped)}")
-    print(f"  CRITICAL: {output['counts']['critical']}")
-    print(f"  HIGH: {output['counts']['high']}")
-    print(f"  MODERATE: {output['counts']['moderate']}")
-    print(f"  Geo points: {len(geo_points)}")
-    print(f"  Disasters: {len(output['disasters'])}")
-    if bigquery_data:
-        for k, v in bigquery_data.items():
-            print(f"  BigQuery {k}: {len(v)} records")
     
     # Write metadata
     meta = {
@@ -679,7 +678,7 @@ def main():
         'sources': {
             'gdelt_doc': 'api.gdeltproject.org/api/v2/doc',
             'gdelt_geo': 'api.gdeltproject.org/api/v2/geo',
-            'gdelt_disasters': 'data.gdeltproject.org disaster stream',
+            'gdelt_disasters': 'data.gdeltproject.org + reliefweb',
             'inciweb': 'inciweb.wildfire.gov',
             'google_news': 'news.google.com',
             'bigquery': 'enabled' if bigquery_data else 'no credentials'
@@ -688,6 +687,14 @@ def main():
     with open(os.path.join(DATA_DIR, 'meta.json'), 'w') as f:
         json.dump(meta, f, indent=2)
     
+    print(f"\n{'='*60}")
+    print(f"Output: {feed_path} ({size_kb:.0f} KB)")
+    print(f"Total articles: {len(deduped)}")
+    print(f"  CRITICAL: {output['counts']['critical']}")
+    print(f"  HIGH: {output['counts']['high']}")
+    print(f"  MODERATE: {output['counts']['moderate']}")
+    print(f"  Geo points: {len(geo_points)}")
+    print(f"  Disasters: {output['counts']['disasters']}")
     print("Done!")
 
 if __name__ == "__main__":
