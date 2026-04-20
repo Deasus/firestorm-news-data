@@ -1,19 +1,20 @@
 {
-  "updated": "2026-04-20T17:59:25Z",
+  "updated": "2026-04-20T20:03:05Z",
   "counts": {
-    "total": 57,
-    "critical": 14,
-    "high": 43,
+    "total": 99,
+    "critical": 13,
+    "high": 66,
     "moderate": 0,
-    "gdelt": 0,
-    "google_news": 57,
-    "inciweb": 0,
-    "geo_points": 0
+    "gdelt": 70,
+    "google_news": 53,
+    "inciweb": 10,
+    "geo_points": 0,
+    "disasters": 0
   },
   "sources": {
     "gdelt_doc": "api.gdeltproject.org/api/v2/doc",
     "gdelt_geo": "api.gdeltproject.org/api/v2/geo",
-    "gdelt_disasters": "data.gdeltproject.org disaster stream",
+    "gdelt_disasters": "data.gdeltproject.org + reliefweb",
     "inciweb": "inciweb.wildfire.gov",
     "google_news": "news.google.com",
     "bigquery": "no credentials"
