@@ -1,22 +1,43 @@
 {
-  "updated": "2026-04-22T14:21:34Z",
+  "updated": "2026-04-22T14:43:26Z",
+  "schema_version": 2,
   "counts": {
-    "total": 177,
-    "critical": 34,
-    "high": 106,
+    "total": 234,
+    "critical": 48,
+    "high": 137,
     "moderate": 2,
+    "glide_tagged": 0,
     "gdelt": 137,
-    "google_news": 58,
+    "google_news": 87,
     "inciweb": 10,
     "geo_points": 0,
-    "disasters": 0
+    "disasters": 0,
+    "bigquery": 0
   },
+  "raw_counts": {
+    "gdelt_doc": 137,
+    "reliefweb_disasters": 0,
+    "gdelt_disasters": 0,
+    "inciweb": 10,
+    "google_news": 87,
+    "bigquery_gkg": 0,
+    "geo_points": 0
+  },
+  "dropped_count": 16,
   "sources": {
     "gdelt_doc": "api.gdeltproject.org/api/v2/doc",
     "gdelt_geo": "api.gdeltproject.org/api/v2/geo",
-    "gdelt_disasters": "data.gdeltproject.org + reliefweb",
-    "inciweb": "inciweb.wildfire.gov",
+    "gdelt_disasters": "data.gdeltproject.org + reliefweb.int",
+    "inciweb": "inciweb.wildfire.gov (with GeoRSS)",
     "google_news": "news.google.com",
     "bigquery": "no credentials"
-  }
+  },
+  "integrity_notes": [
+    "No cross-source dedup \u2014 different outlets on same fire stay separate",
+    "Disasters merged into articles (v1 kept them in separate bucket)",
+    "BigQuery GKG records merged with synthetic titles (v1 also separate)",
+    "ReliefWeb GLIDE IDs fuzzy-matched to GDELT articles",
+    "InciWeb GeoRSS coordinates extracted (v1 hardcoded lat/lng to 0)",
+    "Every discard logged to feed.dropped[]"
+  ]
 }
