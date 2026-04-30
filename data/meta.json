@@ -1,10 +1,10 @@
 {
-  "updated": "2026-04-30T20:13:20Z",
+  "updated": "2026-04-30T21:35:29Z",
   "schema_version": 2,
   "counts": {
     "total": 174,
     "critical": 17,
-    "high": 126,
+    "high": 129,
     "moderate": 0,
     "glide_tagged": 0,
     "gdelt": 75,
