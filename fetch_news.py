@@ -856,20 +856,56 @@ def fuzzy_match_glide_to_articles(articles, disasters):
 
 
 # ── Categorization ──────────────────────────────────────────────────
+# v2 (2026-05-01): tightened the HIGH bucket so MODERATE actually populates.
+# Previous version caught ANY fire-word article as HIGH, leaving 0 MODERATE.
+# Now HIGH requires a severity signal (active incident, large scale, threat)
+# and MODERATE catches ongoing wildfires that aren't immediately threatening.
 
 def categorize_article(title):
     """Categorize an article by urgency based on title keywords."""
     t = (title or '').lower()
-    if any(w in t for w in ['evacuat', 'emergency', 'mandatory', 'order', 'flee', 'shelter']):
+
+    # CRITICAL: immediate life-safety impact or confirmed casualties/destruction
+    if any(w in t for w in ['evacuat', 'mandatory order', 'mandatory evacuation', 'flee', 'shelter in place',
+                              'state of emergency', 'federal emergency', 'red flag warning']):
         return 'CRITICAL'
-    if any(w in t for w in ['dead', 'killed', 'death', 'fatal', 'injur', 'missing', 'destroy']):
+    if any(w in t for w in ['dead', 'killed', 'death', 'fatal', 'injur', 'missing', 'destroyed homes',
+                              'homes destroyed', 'structures destroyed', 'town destroyed']):
         return 'CRITICAL'
-    if any(w in t for w in ['wildfire', 'fire', 'blaze', 'burn', 'acre', 'contain', 'spread']):
+
+    # HIGH: actively threatening, rapidly growing, or large-scale
+    if any(w in t for w in ['out of control', 'uncontained', 'rapidly spreading', 'explosive', 'firestorm',
+                              'conflagration', 'mega-fire', 'megafire']):
         return 'HIGH'
-    if any(w in t for w in ['red flag', 'fire weather', 'fire danger', 'wind', 'dry', 'drought']):
+    # Size-based HIGH: thousands of acres, major incidents
+    if any(w in t for w in ['thousand acres', ',000 acres', 'acres burned', 'acres scorched', 'growing fire',
+                              'spreading fire', 'major fire', 'large fire']):
         return 'HIGH'
-    if any(w in t for w in ['smoke', 'air quality', 'prescribed', 'prevention', 'firefight']):
+    # Immediate threats
+    if any(w in t for w in ['threat', 'threaten', 'evacuation warning', 'evacuation advis', 'power shutoff',
+                              'psps', 'air quality emergency']):
+        return 'HIGH'
+    # Weather extremes directly driving fire behavior
+    if any(w in t for w in ['extreme fire', 'critical fire weather', 'explosive fire', 'firenado',
+                              'fire whirl', 'pyrocumulus']):
+        return 'HIGH'
+
+    # MODERATE: ongoing wildfire coverage without immediate life-safety signal
+    if any(w in t for w in ['wildfire', 'wild fire', 'brush fire', 'grass fire', 'forest fire',
+                              'blaze', 'burning', 'burns', 'burn ', 'burned']):
         return 'MODERATE'
+    if any(w in t for w in ['containment', 'contain ', 'contained', 'percent contain']):
+        return 'MODERATE'
+    if any(w in t for w in ['red flag', 'fire weather', 'fire danger', 'fire season', 'drought',
+                              'dry conditions', 'high wind', 'heat wave']):
+        return 'MODERATE'
+    if any(w in t for w in ['firefight', 'firefighter', 'fire crew', 'air tanker', 'helitack',
+                              'cal fire', 'wildland']):
+        return 'MODERATE'
+    if any(w in t for w in ['smoke', 'air quality', 'prescribed burn', 'prevention', 'defensible space',
+                              'evacuation lift', 'evacuation end']):
+        return 'MODERATE'
+
     return 'LOW'
 
 
