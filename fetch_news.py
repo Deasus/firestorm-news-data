@@ -782,6 +782,120 @@ def fetch_bigquery_fire_data():
     return []
 
 
+# ── GDACS (Global Disaster Alert & Coordination System, UN-backed) ──
+# RSS feed with ~80 active events worldwide (earthquakes, floods, cyclones,
+# wildfires, volcanoes). Schema includes lat/lng, GLIDE IDs, alert level
+# (Green/Orange/Red). Public domain, no auth required.
+
+def fetch_gdacs():
+    """Fetch global disaster events from GDACS RSS."""
+    import requests
+    import xml.etree.ElementTree as ET
+
+    print("\n[GDACS] Fetching global disaster feed...")
+    try:
+        resp = requests.get('https://www.gdacs.org/xml/rss.xml',
+                            headers={'User-Agent':'FIRESTORM/1.0'},
+                            timeout=15)
+        if resp.status_code != 200:
+            print(f"  GDACS HTTP {resp.status_code}")
+            return []
+        root = ET.fromstring(resp.content)
+        ns = {
+            'gdacs': 'http://www.gdacs.org',
+            'georss': 'http://www.georss.org/georss',
+            'geo': 'http://www.w3.org/2003/01/geo/wgs84_pos#',
+            'glide': 'http://glidenumber.net',
+            'dc': 'http://purl.org/dc/elements/1.1/'
+        }
+        records = []
+        for item in root.findall('.//item'):
+            title = (item.findtext('title') or '').strip()
+            if not title:
+                continue
+            link = (item.findtext('link') or '').strip()
+            desc = (item.findtext('description') or '').strip()
+            pub = (item.findtext('pubDate') or '').strip()
+            event_type = item.findtext('gdacs:eventtype', default='', namespaces=ns)
+            alert_level = item.findtext('gdacs:alertlevel', default='', namespaces=ns)
+            country = item.findtext('gdacs:country', default='', namespaces=ns)
+            lat = item.findtext('geo:lat', default=None, namespaces=ns)
+            lng = item.findtext('geo:long', default=None, namespaces=ns)
+            glide = item.findtext('gdacs:glide', default=None, namespaces=ns) or None
+            try: lat = float(lat) if lat else None
+            except: lat = None
+            try: lng = float(lng) if lng else None
+            except: lng = None
+            records.append({
+                'title': title,
+                'url': link or f'https://www.gdacs.org/',
+                'source': f'GDACS ({event_type or "Global"})',
+                'date': pub,
+                'image': '',
+                'language': 'English',
+                'country': country,
+                'description': desc[:500],
+                'lat': lat,
+                'lng': lng,
+                'glide': glide,
+                '_gdacs_alert': alert_level.upper(),
+                '_gdacs_event_type': event_type,
+                'type': 'gdacs'
+            })
+        print(f"  GDACS: {len(records)} events")
+        return records
+    except Exception as e:
+        print(f"  GDACS failed: {e}")
+        return []
+
+
+# ── FEMA Disaster Declarations ──────────────────────────────────────
+# US federal disaster declarations (OpenFEMA v2). Most wildfire-relevant:
+# 'Fire' disaster type. Public API, no auth. Returns one record per
+# declared disaster (one per state/area typically).
+
+def fetch_fema_disasters():
+    """Fetch recent FEMA disaster declarations (fires + severe storms last 60 days)."""
+    import requests
+    from datetime import datetime, timezone, timedelta
+    print("\n[FEMA] Fetching disaster declarations...")
+    try:
+        since = (datetime.now(timezone.utc) - timedelta(days=60)).strftime('%Y-%m-%d')
+        url = ("https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries"
+               f"?$filter=declarationDate%20ge%20%27{since}%27%20and%20"
+               "(incidentType%20eq%20%27Fire%27%20or%20incidentType%20eq%20%27Severe%20Storm%27%20or%20"
+               "incidentType%20eq%20%27Hurricane%27)"
+               "&$top=50&$orderby=declarationDate%20desc")
+        resp = requests.get(url, timeout=15, headers={'User-Agent':'FIRESTORM/1.0'})
+        if resp.status_code != 200:
+            print(f"  FEMA HTTP {resp.status_code}")
+            return []
+        data = resp.json()
+        rows = data.get('DisasterDeclarationsSummaries', [])
+        records = []
+        for r in rows:
+            title = f"FEMA {r.get('declarationType','')} {r.get('disasterNumber','')}: {r.get('declarationTitle') or r.get('incidentType')}"
+            state = r.get('state', '')
+            # FEMA records don't ship coords — let tier-1 geocoder add them from state name later
+            records.append({
+                'title': title.strip(),
+                'url': f"https://www.fema.gov/disaster/{r.get('disasterNumber','')}",
+                'source': 'FEMA',
+                'date': r.get('declarationDate', ''),
+                'image': '',
+                'language': 'English',
+                'country': state + ', USA',
+                'description': (r.get('incidentType','') + ' in ' + (r.get('designatedArea','') or state))[:500],
+                'glide': None,
+                'type': 'fema_disaster'
+            })
+        print(f"  FEMA: {len(records)} recent declarations")
+        return records
+    except Exception as e:
+        print(f"  FEMA failed: {e}")
+        return []
+
+
 # ── InciWeb RSS with GeoRSS parsing ─────────────────────────────────
 
 def fetch_inciweb():
@@ -1184,6 +1298,8 @@ def main():
     inciweb = fetch_inciweb()
     google_news = fetch_google_news()
     bigquery_records = fetch_bigquery_fire_data()  # now list-typed, may be []
+    gdacs_records = fetch_gdacs()
+    fema_records = fetch_fema_disasters()
 
     # ── Raw counts (honest, pre-anything) ──
     raw_counts = {
@@ -1194,6 +1310,8 @@ def main():
         'google_news': len(google_news),
         'bigquery_gkg': len(bigquery_records),
         'geo_points': len(geo_points),
+        'gdacs': len(gdacs_records),
+        'fema': len(fema_records),
     }
     print(f"\n[RAW COUNTS] {raw_counts}")
 
@@ -1222,6 +1340,20 @@ def main():
     for bq in bigquery_records:
         bq['category'] = categorize_article(bq.get('title', ''))
         all_news.append(bq)
+
+    # GDACS — category from alertlevel (Red=CRITICAL, Orange=HIGH, Green=MODERATE)
+    for g in gdacs_records:
+        level = (g.get('_gdacs_alert') or '').upper()
+        if level == 'RED':     g['category'] = 'CRITICAL'
+        elif level == 'ORANGE': g['category'] = 'HIGH'
+        elif level == 'GREEN':  g['category'] = 'MODERATE'
+        else:                   g['category'] = 'MODERATE'
+        all_news.append(g)
+
+    # FEMA declarations — always HIGH (federal disaster declaration is a real event)
+    for fx in fema_records:
+        fx['category'] = 'HIGH'
+        all_news.append(fx)
 
     print(f"\n[MERGED] {len(all_news)} total records before GLIDE enrichment")
 
