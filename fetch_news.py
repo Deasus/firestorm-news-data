@@ -62,6 +62,79 @@ def extract_glide(text):
     return m.group(1) if m else None
 
 
+# ── Geo dictionary — tier-1 geocoder (free, runs locally) ───────────
+# Maps US state names + major fire-relevant cities/regions to lat/lng so
+# news articles get map pins without calling a paid geocoding API. Covers
+# an estimated ~50-60% of US wildfire coverage at zero cost. Tier-2
+# (Google Geocoding) activates when GCP billing is set up — see backlog.
+GEO_DICT = {
+    # US states — centroid approx
+    'alabama': (32.8, -86.8), 'alaska': (64.2, -152.0), 'arizona': (34.2, -111.7),
+    'arkansas': (34.9, -92.4), 'california': (36.7, -119.7), 'colorado': (39.0, -105.5),
+    'connecticut': (41.6, -72.7), 'delaware': (39.0, -75.5), 'florida': (27.8, -81.7),
+    'georgia': (32.9, -83.4), 'hawaii': (20.3, -156.4), 'idaho': (44.2, -114.4),
+    'illinois': (40.0, -89.2), 'indiana': (39.9, -86.3), 'iowa': (42.0, -93.5),
+    'kansas': (38.5, -98.4), 'kentucky': (37.5, -85.3), 'louisiana': (31.0, -92.0),
+    'maine': (45.3, -69.2), 'maryland': (39.0, -76.8), 'massachusetts': (42.4, -71.8),
+    'michigan': (44.3, -85.4), 'minnesota': (46.3, -94.3), 'mississippi': (32.8, -89.7),
+    'missouri': (38.4, -92.5), 'montana': (47.0, -109.6), 'nebraska': (41.5, -99.8),
+    'nevada': (39.3, -116.6), 'new hampshire': (43.7, -71.6), 'new jersey': (40.2, -74.7),
+    'new mexico': (34.4, -106.1), 'new york': (42.9, -75.5), 'north carolina': (35.6, -79.4),
+    'north dakota': (47.5, -100.3), 'ohio': (40.3, -82.8), 'oklahoma': (35.6, -97.5),
+    'oregon': (44.0, -120.5), 'pennsylvania': (40.9, -77.8), 'rhode island': (41.7, -71.5),
+    'south carolina': (33.9, -80.9), 'south dakota': (44.4, -100.2), 'tennessee': (35.9, -86.4),
+    'texas': (31.5, -99.3), 'utah': (39.3, -111.7), 'vermont': (44.0, -72.7),
+    'virginia': (37.5, -78.9), 'washington': (47.4, -120.5), 'west virginia': (38.6, -80.6),
+    'wisconsin': (44.5, -89.5), 'wyoming': (43.0, -107.5),
+    # Major fire-relevant US cities / regions
+    'los angeles': (34.05, -118.25), 'san diego': (32.72, -117.16), 'san francisco': (37.77, -122.42),
+    'sacramento': (38.58, -121.49), 'fresno': (36.75, -119.77), 'bakersfield': (35.37, -119.02),
+    'malibu': (34.03, -118.68), 'pacific palisades': (34.04, -118.53), 'altadena': (34.19, -118.13),
+    'paradise': (39.76, -121.62), 'chico': (39.73, -121.83), 'redding': (40.58, -122.39),
+    'reno': (39.52, -119.81), 'las vegas': (36.17, -115.14), 'phoenix': (33.45, -112.07),
+    'tucson': (32.22, -110.97), 'albuquerque': (35.08, -106.65), 'santa fe': (35.69, -105.94),
+    'denver': (39.74, -104.99), 'boulder': (40.02, -105.27), 'colorado springs': (38.83, -104.82),
+    'salt lake city': (40.76, -111.89), 'boise': (43.62, -116.20), 'portland': (45.52, -122.68),
+    'seattle': (47.61, -122.33), 'spokane': (47.66, -117.43), 'missoula': (46.87, -113.99),
+    'billings': (45.78, -108.51), 'austin': (30.27, -97.74), 'houston': (29.76, -95.37),
+    'dallas': (32.78, -96.80), 'el paso': (31.76, -106.49), 'miami': (25.76, -80.19),
+    'orlando': (28.54, -81.38), 'tallahassee': (30.44, -84.28), 'atlanta': (33.75, -84.39),
+    'nashville': (36.16, -86.78), 'charlotte': (35.23, -80.84),
+    # Fire-relevant regions / forests
+    'sierra nevada': (38.0, -119.5), 'cascade range': (44.0, -121.8), 'mojave': (35.0, -115.5),
+    'sonoran': (33.0, -112.5), 'chihuahuan': (32.0, -107.0), 'rockies': (40.0, -106.0),
+    'great basin': (40.0, -117.0), 'pacific northwest': (46.0, -122.0), 'gulf coast': (29.5, -89.0),
+    'appalachia': (37.0, -82.0), 'ozarks': (37.0, -93.0),
+    # International fire-prone regions
+    'australia': (-25.3, 133.8), 'new south wales': (-32.0, 147.0), 'victoria australia': (-37.0, 145.0),
+    'queensland': (-22.0, 145.0), 'western australia': (-25.0, 122.0), 'tasmania': (-42.0, 147.0),
+    'canada': (56.1, -106.3), 'british columbia': (53.7, -127.6), 'alberta': (53.9, -116.5),
+    'saskatchewan': (52.9, -106.4), 'ontario': (51.2, -85.3), 'quebec': (53.0, -73.5),
+    'yukon': (63.8, -135.5), 'northwest territories': (64.8, -124.8),
+    'greece': (39.0, 22.0), 'spain': (40.0, -4.0), 'portugal': (39.5, -8.0), 'france': (46.6, 2.3),
+    'italy': (42.5, 12.5), 'turkey': (39.0, 35.0), 'chile': (-35.7, -71.5), 'argentina': (-38.4, -63.6),
+    'brazil': (-14.2, -51.9), 'amazon': (-3.0, -60.0), 'siberia': (64.0, 105.0), 'russia': (61.5, 105.3),
+}
+# Longest-first so 'new mexico' matches before 'mexico', 'new york' before 'york', etc.
+GEO_KEYS_SORTED = sorted(GEO_DICT.keys(), key=lambda k: -len(k))
+
+def geo_lookup(title, description=''):
+    """Tier-1 geocoder: dictionary-match state/city names in title + desc.
+    Returns (lat, lng) of the first + most specific match, or None."""
+    text = ((title or '') + ' ' + (description or '')).lower()
+    for k in GEO_KEYS_SORTED:
+        # Word-boundary check: avoid matching 'ohio' inside 'ohioan' etc.
+        needle = ' ' + k + ' '
+        padded = ' ' + text + ' '
+        if needle in padded or padded.startswith(k + ' ') or padded.endswith(' ' + k):
+            return GEO_DICT[k]
+        # Also allow punctuation after keyword
+        for punct in (',', '.', ':', ';', '?', '!', "'", '"'):
+            if (' ' + k + punct) in padded:
+                return GEO_DICT[k]
+    return None
+
+
 # ── GDELT DOC 2.0 API ───────────────────────────────────────────────
 
 def fetch_gdelt_doc_articles():
@@ -978,6 +1051,20 @@ def main():
         all_news.append(bq)
 
     print(f"\n[MERGED] {len(all_news)} total records before GLIDE enrichment")
+
+    # ── Tier-1 geo-tagging (dictionary match) ──
+    # Add lat/lng to articles that don't have them. Free (no API calls).
+    tier1_tagged = 0
+    for art in all_news:
+        if art.get('lat') is not None and art.get('lng') is not None:
+            continue
+        hit = geo_lookup(art.get('title',''), art.get('description',''))
+        if hit:
+            art['lat'] = hit[0]
+            art['lng'] = hit[1]
+            art['_geo_source'] = 'tier1_dict'
+            tier1_tagged += 1
+    print(f"[GEO] Tier-1 tagged {tier1_tagged} / {len(all_news)} articles")
 
     # ── GLIDE fuzzy-match ──
     # Use the disaster records with GLIDE IDs to tag matching articles that
