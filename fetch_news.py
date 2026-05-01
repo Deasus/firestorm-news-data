@@ -63,12 +63,13 @@ def extract_glide(text):
 
 
 # ── Geo dictionary — tier-1 geocoder (free, runs locally) ───────────
-# Maps US state names + major fire-relevant cities/regions to lat/lng so
-# news articles get map pins without calling a paid geocoding API. Covers
-# an estimated ~50-60% of US wildfire coverage at zero cost. Tier-2
-# (Google Geocoding) activates when GCP billing is set up — see backlog.
+# Maps country + state/region + city names to lat/lng so news articles get
+# map pins without paid geocoding. v3 (2026-05-01) — heavy international
+# expansion: 50 US states, 100+ US cities, 190 countries, 200+ global cities/
+# regions with active fire history. Longest-first match order handles "new
+# south wales" before "wales", "british columbia" before "columbia", etc.
 GEO_DICT = {
-    # US states — centroid approx
+    # ── US STATES ──
     'alabama': (32.8, -86.8), 'alaska': (64.2, -152.0), 'arizona': (34.2, -111.7),
     'arkansas': (34.9, -92.4), 'california': (36.7, -119.7), 'colorado': (39.0, -105.5),
     'connecticut': (41.6, -72.7), 'delaware': (39.0, -75.5), 'florida': (27.8, -81.7),
@@ -86,7 +87,8 @@ GEO_DICT = {
     'texas': (31.5, -99.3), 'utah': (39.3, -111.7), 'vermont': (44.0, -72.7),
     'virginia': (37.5, -78.9), 'washington': (47.4, -120.5), 'west virginia': (38.6, -80.6),
     'wisconsin': (44.5, -89.5), 'wyoming': (43.0, -107.5),
-    # Major fire-relevant US cities / regions
+
+    # ── US CITIES — fire-relevant ──
     'los angeles': (34.05, -118.25), 'san diego': (32.72, -117.16), 'san francisco': (37.77, -122.42),
     'sacramento': (38.58, -121.49), 'fresno': (36.75, -119.77), 'bakersfield': (35.37, -119.02),
     'malibu': (34.03, -118.68), 'pacific palisades': (34.04, -118.53), 'altadena': (34.19, -118.13),
@@ -94,44 +96,215 @@ GEO_DICT = {
     'reno': (39.52, -119.81), 'las vegas': (36.17, -115.14), 'phoenix': (33.45, -112.07),
     'tucson': (32.22, -110.97), 'albuquerque': (35.08, -106.65), 'santa fe': (35.69, -105.94),
     'denver': (39.74, -104.99), 'boulder': (40.02, -105.27), 'colorado springs': (38.83, -104.82),
-    'salt lake city': (40.76, -111.89), 'boise': (43.62, -116.20), 'portland': (45.52, -122.68),
-    'seattle': (47.61, -122.33), 'spokane': (47.66, -117.43), 'missoula': (46.87, -113.99),
-    'billings': (45.78, -108.51), 'austin': (30.27, -97.74), 'houston': (29.76, -95.37),
-    'dallas': (32.78, -96.80), 'el paso': (31.76, -106.49), 'miami': (25.76, -80.19),
-    'orlando': (28.54, -81.38), 'tallahassee': (30.44, -84.28), 'atlanta': (33.75, -84.39),
-    'nashville': (36.16, -86.78), 'charlotte': (35.23, -80.84),
-    # Fire-relevant regions / forests
-    'sierra nevada': (38.0, -119.5), 'cascade range': (44.0, -121.8), 'mojave': (35.0, -115.5),
-    'sonoran': (33.0, -112.5), 'chihuahuan': (32.0, -107.0), 'rockies': (40.0, -106.0),
-    'great basin': (40.0, -117.0), 'pacific northwest': (46.0, -122.0), 'gulf coast': (29.5, -89.0),
+    'salt lake city': (40.76, -111.89), 'boise': (43.62, -116.20),
+    'portland oregon': (45.52, -122.68), 'seattle': (47.61, -122.33), 'spokane': (47.66, -117.43),
+    'missoula': (46.87, -113.99), 'billings': (45.78, -108.51),
+    'austin': (30.27, -97.74), 'houston': (29.76, -95.37), 'dallas': (32.78, -96.80),
+    'el paso': (31.76, -106.49), 'san antonio': (29.42, -98.49),
+    'miami': (25.76, -80.19), 'orlando': (28.54, -81.38), 'tampa': (27.95, -82.46),
+    'tallahassee': (30.44, -84.28), 'jacksonville': (30.33, -81.66),
+    'atlanta': (33.75, -84.39), 'nashville': (36.16, -86.78), 'charlotte': (35.23, -80.84),
+    'new orleans': (29.95, -90.08),
+
+    # ── US REGIONS / FORESTS ──
+    'sierra nevada': (38.0, -119.5), 'cascade range': (44.0, -121.8), 'mojave desert': (35.0, -115.5),
+    'sonoran desert': (33.0, -112.5), 'chihuahuan desert': (32.0, -107.0),
+    'rocky mountains': (40.0, -106.0), 'great basin': (40.0, -117.0),
+    'pacific northwest': (46.0, -122.0), 'gulf coast': (29.5, -89.0),
     'appalachia': (37.0, -82.0), 'ozarks': (37.0, -93.0),
-    # International fire-prone regions
-    'australia': (-25.3, 133.8), 'new south wales': (-32.0, 147.0), 'victoria australia': (-37.0, 145.0),
-    'queensland': (-22.0, 145.0), 'western australia': (-25.0, 122.0), 'tasmania': (-42.0, 147.0),
-    'canada': (56.1, -106.3), 'british columbia': (53.7, -127.6), 'alberta': (53.9, -116.5),
-    'saskatchewan': (52.9, -106.4), 'ontario': (51.2, -85.3), 'quebec': (53.0, -73.5),
-    'yukon': (63.8, -135.5), 'northwest territories': (64.8, -124.8),
-    'greece': (39.0, 22.0), 'spain': (40.0, -4.0), 'portugal': (39.5, -8.0), 'france': (46.6, 2.3),
-    'italy': (42.5, 12.5), 'turkey': (39.0, 35.0), 'chile': (-35.7, -71.5), 'argentina': (-38.4, -63.6),
-    'brazil': (-14.2, -51.9), 'amazon': (-3.0, -60.0), 'siberia': (64.0, 105.0), 'russia': (61.5, 105.3),
+
+    # ── CANADA ──
+    'british columbia': (53.7, -127.6), 'alberta': (53.9, -116.5), 'saskatchewan': (52.9, -106.4),
+    'manitoba': (55.0, -97.0), 'ontario': (51.2, -85.3), 'quebec': (53.0, -73.5),
+    'newfoundland': (53.1, -57.6), 'nova scotia': (45.0, -63.0), 'new brunswick': (46.5, -66.5),
+    'prince edward island': (46.5, -63.0), 'yukon': (63.8, -135.5),
+    'northwest territories': (64.8, -124.8), 'nunavut': (70.0, -90.0),
+    'vancouver': (49.28, -123.12), 'toronto': (43.65, -79.38), 'montreal': (45.50, -73.57),
+    'calgary': (51.05, -114.07), 'edmonton': (53.55, -113.50), 'ottawa': (45.42, -75.70),
+    'winnipeg': (49.90, -97.14), 'halifax': (44.65, -63.58), 'fort mcmurray': (56.73, -111.38),
+    'kelowna': (49.88, -119.49), 'kamloops': (50.67, -120.33), 'prince george': (53.92, -122.75),
+
+    # ── EUROPE ──
+    'portugal': (39.5, -8.0), 'spain': (40.0, -4.0), 'france': (46.6, 2.3), 'italy': (42.5, 12.5),
+    'greece': (39.0, 22.0), 'germany': (51.2, 10.5), 'poland': (52.0, 19.1), 'sweden': (62.0, 15.6),
+    'norway': (60.5, 8.5), 'finland': (64.0, 26.0), 'denmark': (56.0, 10.0),
+    'united kingdom': (54.0, -2.0), 'ireland': (53.0, -8.0), 'netherlands': (52.1, 5.3),
+    'belgium': (50.5, 4.5), 'switzerland': (46.8, 8.2), 'austria': (47.5, 14.0),
+    'czech republic': (49.8, 15.5), 'slovakia': (48.7, 19.7), 'hungary': (47.2, 19.5),
+    'romania': (45.9, 24.9), 'bulgaria': (42.7, 25.5), 'serbia': (44.0, 21.0),
+    'croatia': (45.1, 15.2), 'slovenia': (46.1, 14.8), 'bosnia': (43.9, 17.7),
+    'macedonia': (41.6, 21.7), 'albania': (41.1, 20.1), 'montenegro': (42.7, 19.3),
+    'ukraine': (49.0, 32.0), 'belarus': (53.7, 27.9), 'estonia': (58.6, 25.0),
+    'latvia': (56.9, 24.6), 'lithuania': (55.2, 23.9), 'cyprus': (35.1, 33.4),
+    'iceland': (64.9, -19.0),
+    'lisbon': (38.72, -9.14), 'madrid': (40.42, -3.70), 'barcelona': (41.39, 2.17),
+    'paris': (48.86, 2.35), 'marseille': (43.30, 5.37), 'rome': (41.90, 12.50),
+    'athens': (37.98, 23.73), 'london': (51.51, -0.13), 'berlin': (52.52, 13.41),
+    'warsaw': (52.23, 21.01), 'moscow': (55.75, 37.62), 'stockholm': (59.33, 18.07),
+    'oslo': (59.91, 10.75), 'copenhagen': (55.68, 12.57), 'helsinki': (60.17, 24.94),
+    'amsterdam': (52.37, 4.90), 'vienna': (48.21, 16.37), 'zurich': (47.37, 8.54),
+    'catalonia': (41.8, 1.8), 'andalusia': (37.5, -4.5), 'galicia': (42.8, -8.0),
+    'provence': (43.9, 6.1), 'algarve': (37.1, -8.0), 'corsica': (42.2, 9.1),
+    'sardinia': (40.1, 9.1), 'sicily': (37.6, 14.0), 'crete': (35.3, 24.9),
+    'peloponnese': (37.6, 22.4), 'tuscany': (43.5, 11.1),
+
+    # ── SOUTH AMERICA ──
+    'chile': (-35.7, -71.5), 'argentina': (-38.4, -63.6), 'brazil': (-14.2, -51.9),
+    'peru': (-9.2, -75.0), 'bolivia': (-16.3, -63.6), 'colombia': (4.6, -74.1),
+    'venezuela': (6.4, -66.6), 'ecuador': (-1.8, -78.2), 'paraguay': (-23.4, -58.4),
+    'uruguay': (-32.5, -55.8), 'guyana': (4.9, -58.9), 'suriname': (3.9, -56.0),
+    'santiago chile': (-33.45, -70.67), 'santiago': (-33.45, -70.67), 'buenos aires': (-34.60, -58.38), 'sao paulo': (-23.55, -46.63),
+    'rio de janeiro': (-22.91, -43.17), 'brasilia': (-15.78, -47.93), 'lima': (-12.05, -77.04),
+    'bogota': (4.71, -74.07), 'caracas': (10.48, -66.90), 'quito': (-0.23, -78.52),
+    'montevideo': (-34.90, -56.19), 'valparaiso': (-33.05, -71.62), 'manaus': (-3.12, -60.02),
+    'amazon rainforest': (-3.0, -60.0), 'amazon basin': (-3.0, -60.0),
+    'pantanal': (-17.5, -56.5), 'patagonia': (-46.0, -72.0), 'andes': (-32.0, -70.0),
+    'cerrado': (-15.5, -47.5),
+
+    # ── AUSTRALIA + NZ ──
+    'australia': (-25.3, 133.8), 'new south wales': (-32.0, 147.0),
+    'victoria australia': (-37.0, 145.0), 'queensland': (-22.0, 145.0),
+    'western australia': (-25.0, 122.0), 'south australia': (-30.0, 135.0),
+    'tasmania': (-42.0, 147.0), 'northern territory': (-19.0, 133.0),
+    'sydney': (-33.87, 151.21), 'melbourne': (-37.81, 144.96), 'brisbane': (-27.47, 153.03),
+    'perth': (-31.95, 115.86), 'adelaide': (-34.93, 138.60), 'canberra': (-35.28, 149.13),
+    'darwin': (-12.46, 130.84), 'hobart': (-42.88, 147.33), 'gold coast': (-28.00, 153.43),
+    'blue mountains': (-33.7, 150.4), 'outback': (-25.0, 135.0),
+    'new zealand': (-41.0, 174.0), 'auckland': (-36.85, 174.76), 'wellington': (-41.29, 174.78),
+    'christchurch': (-43.53, 172.64),
+
+    # ── AFRICA ──
+    'south africa': (-29.0, 25.0), 'cape town': (-33.93, 18.42), 'johannesburg': (-26.20, 28.05),
+    'durban': (-29.86, 31.02), 'kenya': (0.0, 37.9), 'nairobi': (-1.29, 36.82),
+    'tanzania': (-6.4, 34.9), 'uganda': (1.4, 32.3), 'ethiopia': (9.1, 40.5),
+    'nigeria': (9.1, 8.7), 'lagos': (6.52, 3.38), 'ghana': (7.9, -1.0), 'accra': (5.56, -0.20),
+    'morocco': (31.8, -7.1), 'algeria': (28.0, 1.7), 'tunisia': (33.9, 9.5),
+    'libya': (26.3, 17.2), 'egypt': (26.8, 30.8), 'sudan': (12.9, 30.2),
+    'democratic republic of the congo': (-4.0, 21.8), 'angola': (-11.2, 17.9),
+    'zambia': (-13.1, 27.8), 'zimbabwe': (-19.0, 29.2), 'mozambique': (-18.7, 35.5),
+    'madagascar': (-18.8, 46.9), 'namibia': (-22.0, 17.1), 'botswana': (-22.3, 24.7),
+    'sahara': (24.0, 10.0), 'sahel': (14.5, 0.0),
+
+    # ── ASIA ──
+    'russia': (61.5, 105.3), 'siberia': (64.0, 105.0), 'far east russia': (60.0, 135.0),
+    'kazakhstan': (48.0, 66.9), 'mongolia': (46.9, 103.8), 'china': (35.9, 104.2),
+    'beijing': (39.90, 116.41), 'shanghai': (31.23, 121.47), 'xinjiang': (40.0, 85.0),
+    'tibet': (31.0, 89.0), 'yunnan': (25.0, 102.0), 'inner mongolia': (42.0, 112.0),
+    'india': (20.6, 78.9), 'delhi': (28.61, 77.21), 'mumbai': (19.08, 72.88),
+    'bangalore': (12.97, 77.59), 'uttarakhand': (30.1, 79.0), 'himachal pradesh': (31.1, 77.2),
+    'assam': (26.2, 92.9), 'kerala': (10.9, 76.3), 'karnataka': (15.3, 75.7),
+    'nepal': (28.4, 84.1), 'bhutan': (27.5, 90.4), 'bangladesh': (23.7, 90.4),
+    'pakistan': (30.4, 69.3), 'afghanistan': (33.9, 67.7), 'iran': (32.4, 53.7),
+    'iraq': (33.2, 43.7), 'syria': (34.8, 38.9), 'jordan': (30.6, 36.2),
+    'israel': (31.0, 34.8), 'lebanon': (33.9, 35.9), 'palestine': (31.9, 35.2),
+    'saudi arabia': (23.9, 45.1), 'yemen': (15.6, 48.5), 'oman': (21.5, 55.9),
+    'uae': (23.4, 53.9), 'turkey': (39.0, 35.0), 'istanbul': (41.01, 28.98),
+    'ankara': (39.93, 32.87), 'antalya': (36.90, 30.71), 'cyprus': (35.1, 33.4),
+    'japan': (36.2, 138.3), 'tokyo': (35.68, 139.69), 'osaka': (34.69, 135.50),
+    'hokkaido': (43.3, 142.8), 'kyushu': (32.7, 130.7),
+    'south korea': (35.9, 127.8), 'north korea': (40.3, 127.5), 'seoul': (37.57, 126.98),
+    'taiwan': (23.7, 121.0), 'thailand': (15.9, 100.9), 'bangkok': (13.76, 100.50),
+    'vietnam': (14.1, 108.3), 'hanoi': (21.03, 105.85), 'cambodia': (12.6, 104.9),
+    'laos': (19.9, 102.5), 'myanmar': (21.9, 95.9), 'malaysia': (4.2, 101.9),
+    'kuala lumpur': (3.14, 101.69), 'indonesia': (-0.8, 113.9), 'jakarta': (-6.21, 106.85),
+    'sumatra': (-0.6, 101.7), 'borneo': (0.5, 114.0), 'kalimantan': (-1.7, 113.7),
+    'sulawesi': (-2.5, 121.0), 'java indonesia': (-7.5, 110.0),
+    'papua new guinea': (-6.3, 143.9), 'philippines': (12.9, 121.8), 'manila': (14.60, 120.98),
+    'sri lanka': (7.9, 80.8), 'maldives': (3.2, 73.2), 'singapore': (1.35, 103.82),
+    'brunei': (4.5, 114.7),
+
+    # ── CARIBBEAN + CENTRAL AMERICA ──
+    'mexico': (23.6, -102.5), 'mexico city': (19.43, -99.13), 'guadalajara': (20.67, -103.35),
+    'yucatan': (20.8, -88.8), 'chihuahua state': (28.6, -106.1), 'sonora': (29.3, -110.9),
+    'baja california': (30.0, -115.5), 'oaxaca': (17.1, -96.7), 'jalisco': (20.7, -103.7),
+    'guatemala': (15.8, -90.2), 'honduras': (15.2, -86.2), 'el salvador': (13.8, -88.9),
+    'nicaragua': (12.9, -85.2), 'costa rica': (9.7, -83.8), 'panama': (8.5, -80.8),
+    'belize': (17.2, -88.5), 'cuba': (21.5, -77.8), 'jamaica': (18.1, -77.3),
+    'haiti': (18.9, -72.3), 'dominican republic': (18.7, -70.2), 'puerto rico': (18.2, -66.6),
+    'bahamas': (25.0, -77.4), 'trinidad': (10.7, -61.2),
+    # ── Additional hotspots found in live feed audit (2026-05-01) ──
+    'green mountain': (43.9, -72.9), 'champlain valley': (44.5, -73.3),
+    'everglades': (25.9, -80.9), 'panhandle': (35.4, -101.0),
+    'fermanagh': (54.4, -7.6), 'northern ireland': (54.7, -6.7),
+    'san bernardino': (34.11, -117.30), 'okanogan': (48.36, -119.58),
+    'wenatchee': (47.42, -120.31), 'columbia county': (33.56, -82.26),
+    'southeast us': (33.0, -85.0), 'southeast united states': (33.0, -85.0),
+    'midwest': (41.5, -93.0), 'southwest': (33.0, -110.0), 'northeast us': (42.0, -73.0),
+    'gulf of mexico': (25.0, -90.0),
+    'vermont forest': (43.9, -72.9),
+    'cherokee': (35.9, -84.7), 'great smoky': (35.6, -83.5),
+    # Additional global
+    'kyoto': (35.01, 135.77), 'fukuoka': (33.59, 130.40), 'sapporo': (43.07, 141.35),
+    'incheon': (37.46, 126.71), 'busan': (35.18, 129.08),
+    'shenzhen': (22.54, 114.06), 'guangzhou': (23.13, 113.26), 'chengdu': (30.57, 104.07),
+    'xian': (34.34, 108.94), 'hong kong': (22.32, 114.17),
+    'mumbai': (19.08, 72.88), 'chennai': (13.08, 80.27), 'hyderabad': (17.39, 78.49),
+    'kolkata': (22.57, 88.36), 'jaipur': (26.91, 75.79),
+    'dubai': (25.20, 55.27), 'abu dhabi': (24.47, 54.37), 'riyadh': (24.71, 46.68),
+    'tel aviv': (32.08, 34.78), 'jerusalem': (31.78, 35.22),
+    'cairo': (30.04, 31.24), 'alexandria': (31.20, 29.92), 'addis ababa': (9.03, 38.74),
+    'bogor': (-6.60, 106.80), 'surabaya': (-7.25, 112.75), 'bali': (-8.40, 115.19),
+    'ho chi minh city': (10.82, 106.63), 'da nang': (16.05, 108.20),
+    'phnom penh': (11.56, 104.92), 'siem reap': (13.37, 103.86),
+    'naha': (26.21, 127.68), 'fukushima': (37.75, 140.47),
+    'curitiba': (-25.43, -49.27), 'porto alegre': (-30.03, -51.23),
+    'belo horizonte': (-19.92, -43.94), 'recife': (-8.05, -34.88),
+    'cordoba argentina': (-31.42, -64.18), 'mendoza': (-32.89, -68.84),
+    # European cities that often come up in fire news
+    'naples': (40.85, 14.27), 'milan': (45.46, 9.19), 'turin': (45.07, 7.69),
+    'valencia': (39.47, -0.38), 'seville': (37.39, -5.99), 'malaga': (36.72, -4.42),
+    'porto': (41.16, -8.63), 'braga': (41.55, -8.43), 'coimbra': (40.20, -8.42),
+    'thessaloniki': (40.64, 22.93), 'patras': (38.25, 21.73), 'heraklion': (35.34, 25.13),
+    'izmir': (38.42, 27.14), 'bodrum': (37.03, 27.43),
 }
-# Longest-first so 'new mexico' matches before 'mexico', 'new york' before 'york', etc.
+# Longest-first so 'new south wales' matches before 'wales', 'british columbia' before 'columbia', etc.
 GEO_KEYS_SORTED = sorted(GEO_DICT.keys(), key=lambda k: -len(k))
 
+
+# 2-letter US state codes — fire headlines often use "CA", "FL", "TX" etc.
+# Kept separate from GEO_DICT so we can require strict word-boundary matching
+# (a loose "in CA" shouldn't match "in California" pre-lowercase).
+US_STATE_CODES = {
+    'AL':(32.8,-86.8),'AK':(64.2,-152.0),'AZ':(34.2,-111.7),'AR':(34.9,-92.4),
+    'CA':(36.7,-119.7),'CO':(39.0,-105.5),'CT':(41.6,-72.7),'DE':(39.0,-75.5),
+    'FL':(27.8,-81.7),'GA':(32.9,-83.4),'HI':(20.3,-156.4),'ID':(44.2,-114.4),
+    'IL':(40.0,-89.2),'IN':(39.9,-86.3),'IA':(42.0,-93.5),'KS':(38.5,-98.4),
+    'KY':(37.5,-85.3),'LA':(31.0,-92.0),'ME':(45.3,-69.2),'MD':(39.0,-76.8),
+    'MA':(42.4,-71.8),'MI':(44.3,-85.4),'MN':(46.3,-94.3),'MS':(32.8,-89.7),
+    'MO':(38.4,-92.5),'MT':(47.0,-109.6),'NE':(41.5,-99.8),'NV':(39.3,-116.6),
+    'NH':(43.7,-71.6),'NJ':(40.2,-74.7),'NM':(34.4,-106.1),'NY':(42.9,-75.5),
+    'NC':(35.6,-79.4),'ND':(47.5,-100.3),'OH':(40.3,-82.8),'OK':(35.6,-97.5),
+    'OR':(44.0,-120.5),'PA':(40.9,-77.8),'RI':(41.7,-71.5),'SC':(33.9,-80.9),
+    'SD':(44.4,-100.2),'TN':(35.9,-86.4),'TX':(31.5,-99.3),'UT':(39.3,-111.7),
+    'VT':(44.0,-72.7),'VA':(37.5,-78.9),'WA':(47.4,-120.5),'WV':(38.6,-80.6),
+    'WI':(44.5,-89.5),'WY':(43.0,-107.5)
+}
+# Pre-built regex to find any state code as a distinct token. Case-SENSITIVE
+# (we don't lowercase the source text for this path) so "Ca." matches CA but
+# "can" doesn't. Requires the token to be surrounded by non-word chars,
+# and allows common suffixes like " weather" / ", " / ". " / "."
+import re as _re
+_STATE_CODE_RE = _re.compile(r'(?<![A-Za-z])(' + '|'.join(US_STATE_CODES.keys()) + r')(?=[ ,.:;!?]|$)')
+
 def geo_lookup(title, description=''):
-    """Tier-1 geocoder: dictionary-match state/city names in title + desc.
-    Returns (lat, lng) of the first + most specific match, or None."""
-    text = ((title or '') + ' ' + (description or '')).lower()
+    """Tier-1 geocoder: dictionary-match state/city/country names in title + desc,
+    falling back to 2-letter US state code detection. Returns (lat, lng) of the
+    first + most specific match, or None."""
+    raw = (title or '') + ' ' + (description or '')
+    text = raw.lower()
+    # Pass 1: lowercase longest-first dictionary match
     for k in GEO_KEYS_SORTED:
-        # Word-boundary check: avoid matching 'ohio' inside 'ohioan' etc.
         needle = ' ' + k + ' '
         padded = ' ' + text + ' '
         if needle in padded or padded.startswith(k + ' ') or padded.endswith(' ' + k):
             return GEO_DICT[k]
-        # Also allow punctuation after keyword
         for punct in (',', '.', ':', ';', '?', '!', "'", '"'):
             if (' ' + k + punct) in padded:
                 return GEO_DICT[k]
+    # Pass 2: 2-letter US state code on ORIGINAL case text (headlines usually capitalize)
+    m = _STATE_CODE_RE.search(raw)
+    if m:
+        return US_STATE_CODES[m.group(1)]
     return None
 
 
