@@ -318,10 +318,20 @@ def fetch_gdelt_disasters():
             print(f"  {list_url} failed: {e}")
 
     # ReliefWeb API for active wildfires — richer data than GDELT disaster stream
-    print("  Fetching ReliefWeb active wildfires...")
+    # IMPORTANT (2026-05-01): v1 endpoint was decommissioned. v2 requires an
+    # appname that ReliefWeb approves manually (apidoc.reliefweb.int/parameters#appname).
+    # Until we apply + get approved, this block skips cleanly with a clear log
+    # line instead of failing silently. Set RELIEFWEB_APPNAME env var once
+    # approved and it will activate.
+    rw_appname = os.environ.get('RELIEFWEB_APPNAME', '').strip()
+    if not rw_appname:
+        print("  ReliefWeb SKIPPED — v1 decommissioned, v2 needs approved appname (set RELIEFWEB_APPNAME secret)")
+        # Emit 0 records explicitly so downstream counts stay honest
+        return disaster_records
+    print(f"  Fetching ReliefWeb active wildfires (appname={rw_appname})...")
     try:
         rw_url = (
-            'https://api.reliefweb.int/v1/disasters?appname=firestorm'
+            f'https://api.reliefweb.int/v2/disasters?appname={rw_appname}'
             '&filter[field]=type&filter[value]=Wild Fire&filter[operator]=AND'
             '&filter[conditions][0][field]=status&filter[conditions][0][value]=current'
             '&limit=50'
