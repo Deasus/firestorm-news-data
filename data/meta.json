@@ -1,11 +1,11 @@
 {
-  "updated": "2026-07-03T00:11:27Z",
+  "updated": "2026-07-03T04:27:41Z",
   "schema_version": 2,
   "counts": {
-    "total": 325,
-    "critical": 39,
-    "high": 44,
-    "moderate": 239,
+    "total": 313,
+    "critical": 40,
+    "high": 23,
+    "moderate": 245,
     "glide_tagged": 2,
     "gdelt": 0,
     "google_news": 83,
@@ -22,10 +22,10 @@
     "google_news": 83,
     "bigquery_gkg": 0,
     "geo_points": 0,
-    "gdacs": 214,
-    "fema": 49
+    "gdacs": 220,
+    "fema": 0
   },
-  "dropped_count": 38,
+  "dropped_count": 7,
   "sources": {
     "gdelt_doc": "api.gdeltproject.org/api/v2/doc",
     "gdelt_geo": "api.gdeltproject.org/api/v2/geo",
