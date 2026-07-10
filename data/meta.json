@@ -1,12 +1,12 @@
 {
-  "updated": "2026-07-10T09:42:27Z",
+  "updated": "2026-07-10T12:28:55Z",
   "schema_version": 2,
   "counts": {
-    "total": 411,
-    "critical": 55,
-    "high": 37,
-    "moderate": 279,
-    "glide_tagged": 6,
+    "total": 412,
+    "critical": 57,
+    "high": 38,
+    "moderate": 277,
+    "glide_tagged": 7,
     "gdelt": 75,
     "google_news": 86,
     "inciweb": 10,
@@ -22,7 +22,7 @@
     "google_news": 86,
     "bigquery_gkg": 0,
     "geo_points": 0,
-    "gdacs": 221,
+    "gdacs": 222,
     "fema": 50
   },
   "dropped_count": 35,
