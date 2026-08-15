@@ -1,11 +1,11 @@
 {
-  "updated": "2026-08-15T06:43:59Z",
+  "updated": "2026-08-15T07:35:09Z",
   "schema_version": 2,
   "counts": {
-    "total": 556,
-    "critical": 88,
+    "total": 557,
+    "critical": 86,
     "high": 31,
-    "moderate": 423,
+    "moderate": 425,
     "glide_tagged": 13,
     "gdelt": 75,
     "google_news": 86,
@@ -22,7 +22,7 @@
     "google_news": 86,
     "bigquery_gkg": 0,
     "geo_points": 0,
-    "gdacs": 375,
+    "gdacs": 376,
     "fema": 50
   },
   "dropped_count": 44,
