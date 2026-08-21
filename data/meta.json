@@ -1,13 +1,13 @@
 {
-  "updated": "2026-08-21T02:49:45Z",
+  "updated": "2026-08-21T03:54:28Z",
   "schema_version": 2,
   "counts": {
-    "total": 640,
-    "critical": 44,
-    "high": 36,
-    "moderate": 516,
+    "total": 567,
+    "critical": 36,
+    "high": 35,
+    "moderate": 489,
     "glide_tagged": 12,
-    "gdelt": 75,
+    "gdelt": 0,
     "google_news": 86,
     "inciweb": 10,
     "geo_points": 0,
@@ -15,14 +15,14 @@
     "bigquery": 0
   },
   "raw_counts": {
-    "gdelt_doc": 75,
+    "gdelt_doc": 0,
     "reliefweb_disasters": 0,
     "gdelt_disasters": 0,
     "inciweb": 10,
     "google_news": 86,
     "bigquery_gkg": 0,
     "geo_points": 0,
-    "gdacs": 457,
+    "gdacs": 459,
     "fema": 50
   },
   "dropped_count": 42,
