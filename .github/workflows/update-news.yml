@@ -1,5 +1,10 @@
 name: Update Fire News Intelligence
 
+# CADENCE (2026-10-05): a self-re-dispatching chain, the pattern firestorm-goes-fire-data
+# proved. GitHub's `schedule` is best-effort: measured 2026-10-05, this cron ran only ~5
+# times a day (48/day designed). Each run queues its successor FIRST (the concurrency
+# group holds it until this run ends, so a failed or cancelled run cannot break the chain),
+# does its work, then waits out the rest of a 30-min slot. The cron is now only a dead-man restart.
 on:
   schedule:
     - cron: '*/30 * * * *'
@@ -7,15 +12,28 @@ on:
 
 permissions:
   contents: write
+  actions: write                 # self re-dispatch
 
 jobs:
   update-news:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    concurrency:
+      group: update-news
+      cancel-in-progress: false
+    timeout-minutes: 45
 
     steps:
+      - name: mark the slot start
+        run: echo "SLOT_START=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: queue the next run (first, so this run cannot break the chain)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run update-news.yml --ref main || echo "::warning::re-dispatch failed; the schedule will restart the chain"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -40,3 +58,9 @@ jobs:
           TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M UTC')
           git commit -m "Update fire news — ${TIMESTAMP}" --allow-empty
           git push
+
+      - name: wait out the rest of the 30-min slot
+        if: always()
+        run: |
+          left=$(( 1800 - ($(date +%s) - SLOT_START) ))
+          if [ "$left" -gt 0 ]; then echo "sleeping ${left}s to the next slot"; sleep "$left"; fi
