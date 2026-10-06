@@ -1,11 +1,11 @@
 {
-  "updated": "2026-10-06T17:22:01Z",
+  "updated": "2026-10-06T17:52:23Z",
   "schema_version": 2,
   "counts": {
     "total": 251,
-    "critical": 37,
+    "critical": 41,
     "high": 26,
-    "moderate": 183,
+    "moderate": 179,
     "glide_tagged": 9,
     "gdelt": 0,
     "google_news": 85,
