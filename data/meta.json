@@ -1,10 +1,10 @@
 {
-  "updated": "2026-10-08T15:20:48Z",
+  "updated": "2026-10-08T15:50:33Z",
   "schema_version": 2,
   "counts": {
-    "total": 279,
+    "total": 283,
     "critical": 41,
-    "high": 29,
+    "high": 33,
     "moderate": 205,
     "glide_tagged": 9,
     "gdelt": 0,
@@ -25,7 +25,7 @@
     "gdacs": 174,
     "fema": 50
   },
-  "dropped_count": 45,
+  "dropped_count": 41,
   "sources": {
     "gdelt_doc": "api.gdeltproject.org/api/v2/doc",
     "gdelt_geo": "api.gdeltproject.org/api/v2/geo",
