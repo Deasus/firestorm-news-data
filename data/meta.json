@@ -1,12 +1,12 @@
 {
-  "updated": "2026-10-09T23:27:41Z",
+  "updated": "2026-10-09T23:58:08Z",
   "schema_version": 2,
   "counts": {
     "total": 321,
-    "critical": 38,
+    "critical": 37,
     "high": 37,
-    "moderate": 241,
-    "glide_tagged": 12,
+    "moderate": 242,
+    "glide_tagged": 11,
     "gdelt": 0,
     "google_news": 89,
     "inciweb": 10,
