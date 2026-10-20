@@ -1,13 +1,13 @@
 {
-  "updated": "2026-10-20T16:30:04Z",
+  "updated": "2026-10-20T16:59:55Z",
   "schema_version": 2,
   "counts": {
-    "total": 362,
-    "critical": 46,
-    "high": 29,
-    "moderate": 282,
+    "total": 459,
+    "critical": 48,
+    "high": 30,
+    "moderate": 299,
     "glide_tagged": 7,
-    "gdelt": 0,
+    "gdelt": 97,
     "google_news": 87,
     "inciweb": 10,
     "geo_points": 0,
@@ -15,7 +15,7 @@
     "bigquery": 0
   },
   "raw_counts": {
-    "gdelt_doc": 0,
+    "gdelt_doc": 97,
     "reliefweb_disasters": 0,
     "gdelt_disasters": 0,
     "inciweb": 10,
@@ -25,7 +25,7 @@
     "gdacs": 253,
     "fema": 50
   },
-  "dropped_count": 41,
+  "dropped_count": 52,
   "sources": {
     "gdelt_doc": "api.gdeltproject.org/api/v2/doc",
     "gdelt_geo": "api.gdeltproject.org/api/v2/geo",
