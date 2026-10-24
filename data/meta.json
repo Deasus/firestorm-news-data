@@ -1,13 +1,13 @@
 {
-  "updated": "2026-10-24T16:52:13Z",
+  "updated": "2026-10-24T17:22:18Z",
   "schema_version": 2,
   "counts": {
-    "total": 480,
-    "critical": 40,
+    "total": 464,
+    "critical": 44,
     "high": 34,
-    "moderate": 375,
+    "moderate": 370,
     "glide_tagged": 8,
-    "gdelt": 33,
+    "gdelt": 17,
     "google_news": 89,
     "inciweb": 10,
     "geo_points": 0,
@@ -15,7 +15,7 @@
     "bigquery": 0
   },
   "raw_counts": {
-    "gdelt_doc": 33,
+    "gdelt_doc": 17,
     "reliefweb_disasters": 0,
     "gdelt_disasters": 0,
     "inciweb": 10,
